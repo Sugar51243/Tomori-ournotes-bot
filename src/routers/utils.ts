@@ -1,0 +1,35 @@
+export function isInteger(char: string): boolean {
+    const regex = /^(0|[1-9]\d*)$/;
+    return regex.test(char);
+}
+
+function imageBufferToBase64(buffer: Buffer): string {
+    return buffer.toString('base64');
+}
+
+export function listToBase64(list: Array<Buffer | string>): Array<{ type: 'string' | 'base64', string: string }> {
+    if (!list) {
+        return [];
+    }
+    const result: Array<{ type: 'string' | 'base64', string: string }> = [];
+
+    for (let i = 0; i < list.length; i++) {
+        parseMessage(list[i]);
+    }
+    function parseMessage(message: Buffer | string) {
+        if (typeof message == 'string') {
+            result.push({
+                type: 'string',
+                string: message
+            });
+        }
+        else if (message instanceof Buffer) {
+            result.push({
+                type: 'base64',
+                string: imageBufferToBase64(message)
+            });
+        }
+    }
+
+    return result;
+}
