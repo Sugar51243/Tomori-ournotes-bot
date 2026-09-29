@@ -20,7 +20,7 @@ export const friendUploadRouter = express.Router();
 friendUploadRouter.post(
     '/',
     [
-        body('userId').isString().matches(/^\d{5,12}$/),
+        body('userId').isString(),
         body('userName').isString().isLength({ min: 1, max: 32 }),
         body('avatarUrl').optional().isString().isLength({ max: 512 }),
         body('playerId').isString().matches(/^\d{1,15}$/),
@@ -54,7 +54,7 @@ friendUploadRouter.post(
 export const friendDeleteRouter = express.Router();
 friendDeleteRouter.post(
     '/',
-    [body('userId').isString().matches(/^\d{5,12}$/)],
+    [body('userId').isString()],
     middleware,
     async (req: express.Request, res: express.Response) => {
         const { userId } = req.body;
