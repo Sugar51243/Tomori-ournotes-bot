@@ -4,7 +4,7 @@ import { listToBase64 } from './utils';
 import { middleware } from './middleware';
 import { friendsCollection } from '../data/mongo';
 import { drawFriendList } from '../view/friendList';
-import { isFriendServer } from '../types/Server';
+import { isFriendServer, normalizeServer, defaultServer } from '../types/Server';
 import { FriendDoc } from '../types/Friend';
 
 /**
@@ -38,7 +38,8 @@ friendUploadRouter.post(
             await collection.updateOne(
                 { userId },
                 {
-                    $set: { userName, avatarUrl: avatarUrl || undefined, playerId, server, updatedAt: now },
+                    // 归一化写入: 新记录不再存 'hk-tw-mo' 别名(读取侧仍兼容旧数据)
+                    $set: { userName, avatarUrl: avatarUrl || undefined, playerId, server: normalizeServer(server) ?? defaultServer(), updatedAt: now },
                     $setOnInsert: { userId, createdAt: now }
                 },
                 { upsert: true }

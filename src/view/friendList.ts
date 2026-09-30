@@ -5,6 +5,7 @@ import { drawBackground } from '../components/background';
 import { drawAvatar } from '../components/avatar';
 import { cleanText } from '../components/draw';
 import { FONT_STACK } from '../components/fonts';
+import { serverDisplayName } from '../types/Server';
 
 /**
  * 交友列表图: 一行一人 —— 头像 + QQ 名 + QQ 号 + 游戏 ID + 服务器。
@@ -17,14 +18,6 @@ const ROW_H = 84;
 const AVATAR = 64;
 /** 单图行数上限(头像拉取受每主机限流, 30 行 ≈ 首屏 3s 内) */
 export const FRIENDS_PER_IMAGE = 30;
-
-/** 交友名片上的服务器显示名 */
-const SERVER_DISPLAY: Record<string, string> = {
-    'hk-tw-mo': '港澳台服',
-    jp: '日服',
-    en: '国际服',
-    kr: '韩服'
-};
 
 export async function drawFriendList(friends: FriendDoc[], compress: boolean): Promise<Array<Buffer | string>> {
     if (friends.length === 0) {
@@ -61,7 +54,7 @@ export async function drawFriendList(friends: FriendDoc[], compress: boolean): P
             ctx.fillText(cleanText(friend.userName), tx, y + 12, WIDTH - tx - MARGIN - 10);
             ctx.fillStyle = '#BBB';
             ctx.font = `13px ${FONT_STACK}`;
-            ctx.fillText(`QQ ${friend.userId} · 服务器 ${SERVER_DISPLAY[friend.server] ?? friend.server}`, tx, y + 38, WIDTH - tx - MARGIN - 10);
+            ctx.fillText(`QQ ${friend.userId} · 服务器 ${serverDisplayName(friend.server)}`, tx, y + 38, WIDTH - tx - MARGIN - 10);
             ctx.fillText(`游戏ID ${friend.playerId}`, tx, y + 56, WIDTH - tx - MARGIN - 10);
         }
         buffers.push(await outputFinalBuffer(canvas, compress));

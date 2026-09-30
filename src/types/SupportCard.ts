@@ -1,11 +1,15 @@
 import { SupportCardRow, ItemRow } from './MasterData';
-import { store, t } from '../data/masterdata';
+import { regionFor } from '../data/region';
 import { supportCardThumbUrl, supportCardFullUrl, itemIconUrl } from '../data/assets';
 import { rarityNames, attributeName } from './Card';
 import { getSkills, getMaxLevel, SkillInfo } from '../data/skills';
+import { config } from '../config';
+import { Server, defaultServer } from './Server';
 
 export class SupportCard {
     supportCardId: number;
+    /** 该实体由哪个区域渲染(文本/素材来源); 默认主服, 由调用方在 init() 前指定 */
+    server: Server = defaultServer();
     isExist = false;
     row?: SupportCardRow;
     cardName = '';
@@ -31,6 +35,7 @@ export class SupportCard {
     }
 
     async init(): Promise<void> {
+        const { store, t } = regionFor(this.server);
         this.row = await store.supportCardById(this.supportCardId);
         if (!this.row) return;
         this.isExist = true;
@@ -38,7 +43,7 @@ export class SupportCard {
         this.rarity = this.row.rarity;
         this.assetId = this.row.assetID;
         this.cardType = this.row.cardType;
-        this.attribute = await attributeName(this.row.cardType);
+        this.attribute = await attributeName(this.server, this.row.cardType);
         this.characterIds = this.row.characterIDs ?? [];
         for (const cid of this.characterIds) {
             const ch = await store.characterById(cid);
@@ -52,8 +57,8 @@ export class SupportCard {
         this.startAt = String(this.row.startAt ?? '');
         const descId = String(this.row.descriptionTextID ?? '');
         this.description = descId ? await t(descId) : '';
-        this.maxLevel = await getMaxLevel('MasterSupportCardLevel', this.row.supportCardLevelGroup ?? 0).catch(() => undefined);
-        this.skills = await getSkills([
+        this.maxLevel = await getMaxLevel(this.server, 'MasterSupportCardLevel', this.row.supportCardLevelGroup ?? 0).catch(() => undefined);
+        this.skills = await getSkills(this.server, [
             ['support', this.row.supportSkillId01, '支援技能'],
             ['support', this.row.supportSkillId02, '支援技能'],
             ['support', this.row.gekisouSupportSkillId01, '击奏支援技能'],
@@ -66,11 +71,11 @@ export class SupportCard {
     }
 
     thumbUrl(): string {
-        return supportCardThumbUrl(this.assetId);
+        return supportCardThumbUrl(this.server, this.assetId);
     }
 
     fullUrl(): string {
-        return supportCardFullUrl(this.assetId);
+        return supportCardFullUrl(this.server, this.assetId);
     }
 
     rarityLabel(): string {
@@ -92,6 +97,8 @@ export class SupportCard {
 
 export class Item {
     itemId: number;
+    /** 该实体由哪个区域渲染(文本/素材来源); 默认主服, 由调用方在 init() 前指定 */
+    server: Server = defaultServer();
     isExist = false;
     row?: ItemRow;
     itemName = '';
@@ -102,6 +109,7 @@ export class Item {
     }
 
     async init(): Promise<void> {
+        const { store, t } = regionFor(this.server);
         this.row = await store.itemById(this.itemId);
         if (!this.row) return;
         this.isExist = true;
@@ -110,6 +118,6 @@ export class Item {
     }
 
     iconUrl(): string {
-        return itemIconUrl(this.imagePath);
+        return itemIconUrl(this.server, this.imagePath);
     }
 }

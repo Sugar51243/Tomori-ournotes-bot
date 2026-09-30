@@ -12,8 +12,8 @@
     "build": "tsc",
     "start": "node dist/app.js",
     "typecheck": "tsc --noEmit",
-    "test-cases": "tsx scripts/testCases.ts",
-    "test-db": "tsx scripts/testDbFeatures.ts"
+    "selftest": "node scripts/selftest.mjs",
+    "export": "node scripts/export.mjs"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.9",

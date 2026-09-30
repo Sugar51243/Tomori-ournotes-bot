@@ -2,6 +2,7 @@ import express from 'express';
 import { body } from 'express-validator';
 import { middleware } from './middleware';
 import { Song } from '../types/Song';
+import { isServerList, pickServers, Server, withServer } from '../types/Server';
 import { getChartManifest, getChartNotes, difficultyIdToName } from '../chart/client';
 import { parseNnNotes, mirrorChart } from '../chart/parse';
 import { simplifyChart } from '../chart/simplify';
@@ -16,6 +17,7 @@ const router = express.Router();
 router.post(
     '/',
     [
+        body('displayedServerList').optional().custom(isServerList),
         body('songId').isInt(),
         body('difficultyId').optional().isInt({ min: 0, max: 3 }),
         body('mirror').optional().isBoolean(),
@@ -25,7 +27,7 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { songId, difficultyId = 3, mirror = false, format = 'simple' } = req.body;
         try {
-            const result = await commandSongChartData(songId, difficultyId, mirror, format);
+            const result = await commandSongChartData(pickServers(req.body)[0], songId, difficultyId, mirror, format);
             res.send({ status: 'success', data: result });
         } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
@@ -39,8 +41,8 @@ router.post(
     }
 );
 
-export async function commandSongChartData(songId: number, difficultyId: number, mirror: boolean, format: string) {
-    const song = new Song(songId);
+export async function commandSongChartData(server: Server, songId: number, difficultyId: number, mirror: boolean, format: string) {
+    const song = withServer(new Song(songId), server);
     await song.init();
     if (!song.isExist) {
         throw new Error('错误: 歌曲不存在');

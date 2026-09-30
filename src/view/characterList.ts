@@ -4,6 +4,7 @@ import { imageBuffer, characterIconUrl } from '../data/assets';
 import { drawTitle, outputFinalBuffer } from '../components/list';
 import { drawBackground, commonBandId } from '../components/background';
 import { FONT_STACK } from '../components/fonts';
+import { Server } from '../types/Server';
 
 const COL_COUNT = 3;
 const CARD_W = 300;
@@ -11,7 +12,7 @@ const CARD_H = 90;
 const MARGIN = 16;
 
 /** 角色搜索列表图 */
-export async function drawCharacterList(characters: Character[], compress: boolean): Promise<Array<Buffer | string>> {
+export async function drawCharacterList(server: Server, characters: Character[], compress: boolean): Promise<Array<Buffer | string>> {
     const rows = Math.ceil(characters.length / COL_COUNT);
     const width = MARGIN + COL_COUNT * (CARD_W + MARGIN);
     const height = 56 + rows * (CARD_H + MARGIN) + MARGIN;
@@ -19,7 +20,7 @@ export async function drawCharacterList(characters: Character[], compress: boole
     const ctx = canvas.getContext('2d');
 
     // 结果全部同属一个乐队时用该乐队背景, 混合结果用 other 背景
-    await drawBackground(ctx, width, height, commonBandId(characters.map(c => c.bandId)));
+    await drawBackground(ctx, width, height, { server, bandId: commonBandId(characters.map(c => c.bandId)) });
     drawTitle(ctx, width, `共 ${characters.length} 名角色`);
 
     for (let i = 0; i < characters.length; i++) {
@@ -33,7 +34,7 @@ export async function drawCharacterList(characters: Character[], compress: boole
         ctx.fillRect(x, y, CARD_W, CARD_H);
         ctx.fillStyle = '#222';
         ctx.fillRect(x + 8, y + 8, 74, 74);
-        const icon = await imageBuffer(characterIconUrl(c.characterId), `images/character/${c.characterId}_icon.png`);
+        const icon = await imageBuffer(characterIconUrl(c.server, c.characterId), `images/character/${c.server}/${c.characterId}_icon.png`);
         if (icon) {
             try {
                 ctx.drawImage(await loadImage(icon), x + 8, y + 8, 74, 74);

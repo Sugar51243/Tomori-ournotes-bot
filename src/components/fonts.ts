@@ -13,6 +13,15 @@ const CJK_FONTS = [
     'C:/Windows/Fonts/simhei.ttf',
     'C:/Windows/Fonts/arial.ttf'
 ];
+/**
+ * 韩文回退: 上面这些字体都不含谚文, 而**公告标题是上游原文**(不走 MasterText),
+ * 韩服公告会整篇变豆腐块。Malgun Gothic 是 Windows 自带的韩文字体。
+ */
+const KOREAN_FONTS = [
+    'C:/Windows/Fonts/malgun.ttf',
+    'C:/Windows/Fonts/gulim.ttc',
+    'C:/Windows/Fonts/batang.ttc'
+];
 /** 符号/表情回退: Segoe UI Symbol 覆盖炼金术符号(歌曲 Symbol II/IV 🜁🜃)、♡、emoji 等微软雅黑缺字 */
 const SYMBOL_FONTS = [
     'C:/Windows/Fonts/seguisym.ttf',
@@ -20,7 +29,7 @@ const SYMBOL_FONTS = [
 ];
 
 /** 统一字体栈: 主字体缺字时依次由后面的族补上(故 Segoe UI Symbol 必须排在 Arial 之前) */
-export const FONT_STACK = '"Microsoft YaHei", "Segoe UI Symbol", "Segoe UI Emoji", "SimHei", "Arial", sans-serif';
+export const FONT_STACK = '"Microsoft YaHei", "Malgun Gothic", "Segoe UI Symbol", "Segoe UI Emoji", "SimHei", "Arial", sans-serif';
 
 export function registerFonts(): void {
     let registered = false;
@@ -38,6 +47,17 @@ export function registerFonts(): void {
     }
     if (!registered) {
         logger('fonts', 'warning: no CJK font registered, Chinese text may not render');
+    }
+    for (const p of KOREAN_FONTS) {
+        try {
+            if (fs.existsSync(p)) {
+                GlobalFonts.registerFromPath(p);
+                logger('fonts', `registered korean font: ${p}`);
+                break;
+            }
+        } catch {
+            /* 尝试下一个 */
+        }
     }
     for (const p of SYMBOL_FONTS) {
         try {

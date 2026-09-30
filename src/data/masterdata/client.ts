@@ -2,6 +2,7 @@ import { config } from '../../config';
 import { cachedJSON } from '../cachedFetch';
 import { diskCache } from '../cache';
 import { logger } from '../../logger';
+import { Server, serverProfile } from '../../types/Server';
 
 export interface DataVersionInfo {
     dataVersion: string;
@@ -42,55 +43,111 @@ export function normalizeTable(body: unknown): Record<string, unknown>[] {
 }
 
 /**
- * masterdata 客户端:
- * - dataVersion 轮询(10min TTL, 允许陈旧回退)
- * - 表拉取, 按 dataVersion 分目录缓存, ETag 重验证, 404 视为空表
- * - 内存 store 按版本切换懒加载
+ * dataVersion 用作目录名时必须净化 ——
+ * jp 的版本形如 `1.0.0.300/9c69e777...`(资源版本 + 哈希, 中间是斜杠),
+ * 直接用会多出一层目录, 并使 pruneMasterdataVersions 的「按版本删目录」判断错位。
  */
-class MasterdataClient {
-    private tables = new Map<string, Record<string, unknown>[]>();
-    private currentVersion: string | undefined;
-    private versionInfo: DataVersionInfo | undefined;
+export function versionToken(dataVersion: string): string {
+    return dataVersion.replace(/[^A-Za-z0-9._-]/g, '_');
+}
 
-    async getDataVersion(): Promise<DataVersionInfo> {
-        const res = await cachedJSON<Record<string, unknown>>(
+// ---- 版本清单: 一份文档含全部区域, 全局只拉一次 ----
+
+export interface VersionManifest {
+    /** current_version.json 里的 regions 原样保留(键为上游键名, tw 的键是 hk-tw-mo) */
+    regions: Record<string, DataVersionInfo>;
+    fetchedAt: number;
+}
+
+let manifest: VersionManifest | undefined;
+let manifestInflight: Promise<VersionManifest> | undefined;
+
+/**
+ * 读取 current_version.json。全文只请求一次并进程内缓存(VERSION_TTL_S),
+ * 与后续访问了几个区域无关 —— 各区域只是从中取自己那一份。
+ */
+export async function getVersionManifest(force = false): Promise<VersionManifest> {
+    if (!force && manifest && Date.now() - manifest.fetchedAt < config.versionTtlS * 1000) {
+        return manifest;
+    }
+    if (manifestInflight) return manifestInflight;
+
+    manifestInflight = (async () => {
+        const res = await cachedJSON<{ regions?: Record<string, { version?: string; resource_version?: string }> }>(
             `${config.metaBase}/current_version.json`,
             { key: 'version/current_version.json', ttlS: config.versionTtlS, allowStale: true }
         );
-        const regions = res.regions as Record<string, { version?: string; resource_version?: string }> | undefined;
-        const region = regions?.['hk-tw-mo'];
-        if (!region?.version) throw new MasterDataError('current_version.json missing hk-tw-mo region');
-        return { dataVersion: region.version, resourceVersion: region.resource_version ?? '' };
+        const regions: Record<string, DataVersionInfo> = {};
+        for (const [key, region] of Object.entries(res.regions ?? {})) {
+            if (!region?.version) continue;
+            regions[key] = { dataVersion: region.version, resourceVersion: region.resource_version ?? '' };
+        }
+        if (Object.keys(regions).length === 0) {
+            throw new MasterDataError('current_version.json contains no usable regions');
+        }
+        manifest = { regions, fetchedAt: Date.now() };
+        return manifest;
+    })().finally(() => { manifestInflight = undefined; });
+
+    return manifestInflight;
+}
+
+/** 同步读已加载的清单(未加载返回 undefined); 供 pickServers 之类的判断使用 */
+export function cachedVersionManifest(): VersionManifest | undefined {
+    return manifest;
+}
+
+/**
+ * masterdata 客户端(每个区域一个实例):
+ * - 表拉取, 按「区域 + dataVersion」分目录缓存, ETag 重验证, 404 视为空表
+ * - 内存表引用按实例隔离, 天然按区域分片
+ */
+export class MasterdataClient {
+    readonly server: Server;
+    private tables = new Map<string, Record<string, unknown>[]>();
+    private currentVersion: string | undefined;
+
+    constructor(server: Server) {
+        this.server = server;
     }
 
-    private async ensureVersion(): Promise<DataVersionInfo> {
-        if (!this.versionInfo) {
-            this.versionInfo = await this.getDataVersion();
-            this.currentVersion = this.versionInfo.dataVersion;
-            // 启动时清理不属于当前版本的旧表目录(保留当前版本)
-            await diskCache.pruneMasterdataVersions([this.currentVersion]);
+    /** 本区域的版本; 清单里没有该区域时抛错 */
+    async getDataVersion(): Promise<DataVersionInfo> {
+        const profile = serverProfile(this.server);
+        const info = (await getVersionManifest()).regions[profile.masterdataKey];
+        if (!info?.dataVersion) {
+            throw new MasterDataError(`current_version.json missing region ${profile.masterdataKey}`);
         }
-        return this.versionInfo;
+        return info;
+    }
+
+    private async ensureVersion(): Promise<string> {
+        if (!this.currentVersion) {
+            this.currentVersion = (await this.getDataVersion()).dataVersion;
+            // 首次拉起时清理本区域不属于当前版本的旧表目录
+            await diskCache.pruneMasterdataVersions(this.server, [versionToken(this.currentVersion)]);
+        }
+        return this.currentVersion;
     }
 
     /** 获取并缓存一张表; 404 -> 空表; 网络失败且有缓存 -> 陈旧回退 */
     async getTable<T = Record<string, unknown>>(name: string): Promise<T[]> {
-        const { dataVersion } = await this.ensureVersion();
-        const cacheKey = `masterdata/tables/${dataVersion}/${name}.json`;
+        const dataVersion = await this.ensureVersion();
+        const cacheKey = `masterdata/tables/${this.server}/${versionToken(dataVersion)}/${name}.json`;
         const cached = this.tables.get(cacheKey);
         if (cached) return cached as T[];
 
         const rows = await diskCache.singleFlight(cacheKey, async () => {
             try {
                 const res = await cachedJSON<unknown>(
-                    `${config.metaBase}/master/${name}.json?v=${encodeURIComponent(dataVersion)}`,
+                    `${config.metaBase}/${serverProfile(this.server).masterPath}/master/${name}.json?v=${encodeURIComponent(dataVersion)}`,
                     { key: cacheKey, ttlS: config.masterdataTtlS, allowStale: true, revalidate: true }
                 );
                 return normalizeTable(res);
             } catch (e) {
                 const status = (e as { response?: { status?: number } })?.response?.status;
                 if (status === 404) {
-                    logger('masterdata', `table ${name} not found (404), treating as empty`);
+                    logger('masterdata', `[${this.server}] table ${name} not found (404), treating as empty`);
                     await diskCache.write(cacheKey, Buffer.from('[]'), { etag: undefined });
                     return [];
                 }
@@ -102,20 +159,28 @@ class MasterdataClient {
         return result as T[];
     }
 
-    /** dataVersion 变化时重置内存 store(由 /health 与门面调用) */
+    /** 版本变化时重置本区域的内存表 */
     async refreshIfVersionChanged(): Promise<boolean> {
         const info = await this.getDataVersion();
         if (info.dataVersion !== this.currentVersion) {
-            logger('masterdata', `dataVersion changed: ${this.currentVersion} -> ${info.dataVersion}, resetting store`);
+            logger('masterdata', `[${this.server}] dataVersion changed: ${this.currentVersion} -> ${info.dataVersion}, resetting store`);
             this.tables.clear();
-            this.versionInfo = info;
             this.currentVersion = info.dataVersion;
-            await diskCache.pruneMasterdataVersions([info.dataVersion]);
+            await diskCache.pruneMasterdataVersions(this.server, [versionToken(info.dataVersion)]);
             return true;
         }
         return false;
     }
 }
 
-export const masterdataClient = new MasterdataClient();
-export const getDataVersion = () => masterdataClient.getDataVersion();
+const clients = new Map<Server, MasterdataClient>();
+
+/** 每个区域一个客户端实例(懒创建) */
+export function clientFor(server: Server): MasterdataClient {
+    let client = clients.get(server);
+    if (!client) {
+        client = new MasterdataClient(server);
+        clients.set(server, client);
+    }
+    return client;
+}

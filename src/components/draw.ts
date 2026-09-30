@@ -1,5 +1,20 @@
 import { SKRSContext2D } from '@napi-rs/canvas';
 
+/**
+ * 以**字形实际上下界**在 centerY 处做视觉居中。
+ * CJK 字体的 em 盒比字形本身高, 直接用 textBaseline='middle' 会整体偏低,
+ * 与旁边的图标/色块排在一行时看得出来。
+ * 调用前请自备 ctx.font 与 ctx.fillStyle(本函数只动 textBaseline)。
+ */
+export function fillTextCentered(ctx: SKRSContext2D, text: string, x: number, centerY: number, maxWidth?: number): void {
+    const prev = ctx.textBaseline;
+    ctx.textBaseline = 'alphabetic';
+    const m = ctx.measureText(text);
+    const baseline = centerY + (m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+    ctx.fillText(text, x, baseline, maxWidth);
+    ctx.textBaseline = prev;
+}
+
 /** 圆角矩形路径 */
 export function roundedRectPath(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
     const radius = Math.max(0, Math.min(r, w / 2, h / 2));

@@ -9,6 +9,11 @@ export interface CachedFetchOptions {
     allowStale?: boolean;
     /** 使用 ETag 重验证(304 时刷新 TTL) */
     revalidate?: boolean;
+    /**
+     * 跳过新鲜度判断, 每次都走条件请求(ETag 命中则 304, 无正文)。
+     * 变更检测必须用它 —— 否则 TTL 内的轮询会一直读到同一份缓存, 永远发现不了更新。
+     */
+    forceRefresh?: boolean;
 }
 
 export interface FetchedBuffer {
@@ -29,7 +34,7 @@ export interface FetchedBuffer {
 export function cachedFetch(url: string, options: CachedFetchOptions): Promise<FetchedBuffer | undefined> {
     return diskCache.singleFlight(options.key, async () => {
         const cached = await diskCache.read(options.key);
-        if (cached && diskCache.isFresh(cached, options.ttlS)) {
+        if (!options.forceRefresh && cached && diskCache.isFresh(cached, options.ttlS)) {
             return { data: cached.data, source: 'hit' as const, etag: cached.etag };
         }
         try {

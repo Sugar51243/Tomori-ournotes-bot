@@ -30,7 +30,7 @@ async function safeLoad(buf: Buffer): Promise<Image | undefined> {
 
 async function loadVisual(result: GachaDrawResult): Promise<DrawVisual> {
     if (result.kind === 'member' && result.card) {
-        const buf = await imageBuffer(cardThumbUrl(result.card.cardId), `images/card/${result.card.cardId}_thumb.png`);
+        const buf = await imageBuffer(cardThumbUrl(result.card.server, result.card.cardId), `images/card/${result.card.server}/${result.card.cardId}_thumb.png`);
         return {
             key: `member:${result.card.cardId}`,
             label: result.card.cardName,
@@ -41,7 +41,7 @@ async function loadVisual(result: GachaDrawResult): Promise<DrawVisual> {
         };
     }
     if (result.kind === 'support' && result.supportCard) {
-        const buf = await imageBuffer(supportCardThumbUrl(result.supportCard.assetId), `images/support/${result.supportCard.assetId}_thumb.png`);
+        const buf = await imageBuffer(supportCardThumbUrl(result.supportCard.server, result.supportCard.assetId), `images/support/${result.supportCard.server}/${result.supportCard.assetId}_thumb.png`);
         return {
             key: `support:${result.supportCard.supportCardId}`,
             label: result.supportCard.cardName,
@@ -52,7 +52,7 @@ async function loadVisual(result: GachaDrawResult): Promise<DrawVisual> {
         };
     }
     const item = result.item;
-    const buf = item?.imagePath ? await imageBuffer(itemIconUrl(item.imagePath), `images/item/${item.itemId}.webp`) : undefined;
+    const buf = item?.imagePath ? await imageBuffer(itemIconUrl(item.server, item.imagePath), `images/item/${item.server}/${item.itemId}.webp`) : undefined;
     return {
         key: `item:${item?.itemId ?? 0}`,
         label: item?.itemName ?? '道具',

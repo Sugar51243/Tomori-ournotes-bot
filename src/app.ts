@@ -1,12 +1,14 @@
 import express from 'express';
-import { config, REGION } from './config';
+import { config } from './config';
 import { logger } from './logger';
 import { registerFonts } from './components/fonts';
-import { getDataVersion } from './data/masterdata/client';
+import { getVersionManifest } from './data/masterdata/client';
+import { SERVER_LIST, Server, serverProfile } from './types/Server';
 import { searchSongRouter } from './routers/searchSong';
 import { songMetaRouter } from './routers/songMeta';
 import { songChartRouter } from './routers/songChart';
 import { songChartDataRouter } from './routers/songChartData';
+import { songRankingRouter } from './routers/songRanking';
 import { searchCardRouter } from './routers/searchCard';
 import { searchMemberCardRouter } from './routers/searchMemberCard';
 import { searchSupportCardRouter } from './routers/searchSupportCard';
@@ -21,6 +23,10 @@ import { stationRouter } from './routers/station';
 import { roomListRouter } from './routers/roomList';
 import { songRandomRouter } from './routers/songRandom';
 import { fuzzySearchRouter } from './routers/fuzzySearch';
+import { announcementRouter } from './routers/announcementRoute';
+import { createAnnouncementStreamRouter } from './routers/announcementStream';
+import { playerRouter } from './routers/playerRoute';
+import { gatewayConfigured } from './data/player/client';
 import { disabledRouter } from './routers/disabled';
 
 const app = express();
@@ -28,10 +34,24 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', async (_req, res) => {
     try {
-        const version = await getDataVersion();
+        const manifest = await getVersionManifest(true);
+        const regions: Record<string, { version: string; resourceVersion: string }> = {};
+        for (const server of SERVER_LIST) {
+            const info = manifest.regions[serverProfile(server).masterdataKey];
+            if (info) regions[server] = { version: info.dataVersion, resourceVersion: info.resourceVersion };
+        }
         res.send({
             status: 'success',
-            data: { ok: true, dataVersion: version.dataVersion, resourceVersion: version.resourceVersion, region: REGION, upTimeS: Math.floor(process.uptime()) }
+            data: {
+                ok: true,
+                // 保留旧的单值字段, 便于既有监控继续工作
+                region: config.defaultServer,
+                defaultServer: config.defaultServer,
+                servers: SERVER_LIST as unknown as Server[],
+                regions,
+                playerGateway: gatewayConfigured(),
+                upTimeS: Math.floor(process.uptime())
+            }
         });
     } catch (e) {
         res.status(500).send({ status: 'failed', data: '内部错误' });
@@ -42,6 +62,7 @@ app.use('/searchSong', searchSongRouter);
 app.use('/songMeta', songMetaRouter);
 app.use('/songChart', songChartRouter);
 app.use('/songChartData', songChartDataRouter);
+app.use('/songRanking', songRankingRouter);                // 歌曲排行前十(单服, 用户动态数据)
 app.use('/searchCard', searchCardRouter);                  // 查卡(整合两者)
 app.use('/searchMemberCard', searchMemberCardRouter);      // 查角色卡(仅角色卡)
 app.use('/searchSupportCard', searchSupportCardRouter);    // 查支援卡(仅支援卡)
@@ -53,13 +74,15 @@ app.use('/getCardIllustration', getCardIllustrationRouter);
 app.use('/getStampImage', getStampImageRouter);            // 贴纸原图(按数字 ID)
 app.use('/songRandom', songRandomRouter);
 app.use('/fuzzySearch', fuzzySearchRouter);
+app.use('/announcements', announcementRouter);             // 公告查询(单服出图)
+app.use('/announcementStream', createAnnouncementStreamRouter());  // 公告推送(每服一条 SSE)
+app.use('/searchPlayer', playerRouter);                    // 账号查询(单服, 用户动态数据)
 
 if (config.enableDb) {
     logger('app', `community features enabled (mongo: ${config.mongoUri || '未配置'})`);
 } else {
     logger('app', 'ENABLE_DB=false, community features (friend/station) stay disabled');
 }
-app.use('/searchPlayer', disabledRouter());
 app.use('/cutoffAll', disabledRouter());
 app.use('/cutoffDetail', disabledRouter());
 app.use('/cutoffListOfRecentEvent', disabledRouter());
@@ -78,5 +101,5 @@ app.use((_req, res) => {
 registerFonts();
 
 app.listen(config.port, () => {
-    logger('expressMainThread', `listening on port ${config.port}`);
+    logger('expressMainThread', `listening on port ${config.port} (defaultServer=${config.defaultServer}, servers=${SERVER_LIST.join('/')})`);
 });

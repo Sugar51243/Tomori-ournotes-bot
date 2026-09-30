@@ -155,7 +155,8 @@ export interface StampRow {
     /** 1=角色贴纸 2=文字贴纸 3=稀有贴纸 */
     stampCategory: number;
     priority: number;
-    characterIDs: number[];
+    /** 注意是小写 d —— MasterStamp 用 `_characterIds`, 而 MasterSupportCard 用 `_characterIDs`(大写 D) */
+    characterIds: number[];
     isInitialOwnership: boolean;
     stampAsset: string;
     voiceAsset: string;

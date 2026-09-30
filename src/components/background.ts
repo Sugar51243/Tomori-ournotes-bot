@@ -1,5 +1,6 @@
 import { loadImage, SKRSContext2D } from '@napi-rs/canvas';
-import { imageBuffer, backgroundUrl } from '../data/assets';
+import { imageBuffer, backgroundUrl, assetCacheKey } from '../data/assets';
+import { Server, defaultServer } from '../types/Server';
 
 /**
  * 结果背景图: 按搜索结果归属(乐队)选择官方背景图, 叠加暗色蒙版保证文字可读。
@@ -36,14 +37,14 @@ export async function drawBackground(
     ctx: SKRSContext2D,
     width: number,
     height: number,
-    bandId?: number,
-    scrimAlpha = 0.62
+    opts: { server?: Server; bandId?: number; scrimAlpha?: number } = {}
 ): Promise<void> {
+    const { server = defaultServer(), bandId, scrimAlpha = 0.62 } = opts;
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, width, height);
 
     const name = backgroundNameForBand(bandId);
-    const buf = await imageBuffer(backgroundUrl(name), `images/background/${name}.webp`).catch(() => undefined);
+    const buf = await imageBuffer(backgroundUrl(server, name), assetCacheKey(server, `background/${name}.webp`)).catch(() => undefined);
     if (buf) {
         try {
             const img = await loadImage(buf);

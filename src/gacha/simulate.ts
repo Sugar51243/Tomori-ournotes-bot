@@ -1,5 +1,6 @@
 import { config } from '../config';
-import { store } from '../data/masterdata';
+import { storeFor } from '../data/region';
+import { Server, defaultServer, withServer } from '../types/Server';
 import { logger } from '../logger';
 import { Card } from '../types/Card';
 import { SupportCard, Item } from '../types/SupportCard';
@@ -45,12 +46,12 @@ function pickWeighted<T>(entries: [T, number][]): T | undefined {
 async function drawFromLot(gacha: Gacha): Promise<GachaDrawResult | undefined> {
     const lotGroupId = gacha.row?.lotGroupId;
     if (!lotGroupId) return undefined;
-    const lots = await store.gachaLotsByGroup(lotGroupId);
+    const lots = await storeFor(gacha.server).gachaLotsByGroup(lotGroupId);
     if (lots.length === 0) return undefined;
 
     const lot = pickWeighted(lots.map(l => [l, l.weight] as [typeof l, number]));
     if (!lot) return undefined;
-    const prizes = await store.gachaPrizesByGroup(lot.prizeGroupId);
+    const prizes = await storeFor(gacha.server).gachaPrizesByGroup(lot.prizeGroupId);
     if (prizes.length === 0) return undefined;
 
     const prize = pickWeighted(prizes.map(p => [p, p.pickUpFixedRate > 0 ? p.pickUpFixedRate : 1] as [typeof p, number]));
@@ -58,35 +59,36 @@ async function drawFromLot(gacha: Gacha): Promise<GachaDrawResult | undefined> {
     const pickUp = prize.pickUpType === 2;
 
     if (prize.resourceType === 2) {
-        const card = new Card(prize.resourceId);
+        const card = withServer(new Card(prize.resourceId), gacha.server);
         await card.init();
         if (!card.isExist) return undefined;
         return { kind: 'member', rarity: card.rarity || lot.rarityConstraint, card, pickUp };
     }
     if (prize.resourceType === 3) {
-        const support = new SupportCard(prize.resourceId);
+        const support = withServer(new SupportCard(prize.resourceId), gacha.server);
         await support.init();
         if (!support.isExist) return undefined;
         return { kind: 'support', rarity: support.rarity || lot.rarityConstraint, supportCard: support, pickUp };
     }
     // 道具
-    const item = new Item(prize.resourceId);
+    const item = withServer(new Item(prize.resourceId), gacha.server);
     await item.init();
     if (!item.isExist) return undefined;
     return { kind: 'item', rarity: 0, item, itemAmount: prize.amount, pickUp };
 }
 
 /** 兜底抽取: 配置概率 + 全卡池均匀 */
-async function drawFromFallback(): Promise<GachaDrawResult> {
+async function drawFromFallback(server: Server): Promise<GachaDrawResult> {
     const rarityEntries = Object.entries(config.gachaDefaultRates)
         .map(([r, w]) => [parseInt(r, 10), w] as [number, number]);
     const rarity = pickWeighted(rarityEntries) ?? 2;
+    const store = storeFor(server);
     const pool = (await store.cardList()).filter(c => c.rarity === rarity);
     const all = (await store.cardList());
     const candidates = pool.length > 0 ? pool : all;
     const picked = pickWeighted(candidates.map(c => [c, 1] as [typeof c, number]));
     if (!picked) throw new Error('card pool is empty');
-    const card = new Card(picked.id);
+    const card = withServer(new Card(picked.id), server);
     await card.init();
     return { kind: 'member', rarity, card, pickUp: false };
 }
@@ -98,7 +100,7 @@ async function drawOnce(gacha: Gacha): Promise<GachaDrawResult> {
     } catch (e) {
         logger('gacha', `lot-based draw failed, using fallback: ${e instanceof Error ? e.message : e}`);
     }
-    return drawFromFallback();
+    return drawFromFallback(gacha.server);
 }
 
 /**
@@ -122,21 +124,21 @@ export async function simulateGacha(gacha: Gacha, times: number): Promise<GachaD
 async function drawUpgraded(gacha: Gacha): Promise<GachaDrawResult | undefined> {
     const lotGroupId = gacha.row?.lotGroupId;
     if (lotGroupId) {
-        const lots = (await store.gachaLotsByGroup(lotGroupId))
+        const lots = (await storeFor(gacha.server).gachaLotsByGroup(lotGroupId))
             .filter(l => l.rarityConstraint >= 3);
         if (lots.length > 0) {
             const lot = pickWeighted(lots.map(l => [l, l.weight] as [typeof l, number]));
             if (lot) {
-                const prizes = (await store.gachaPrizesByGroup(lot.prizeGroupId))
+                const prizes = (await storeFor(gacha.server).gachaPrizesByGroup(lot.prizeGroupId))
                     .filter(p => p.resourceType === 2 || p.resourceType === 3);
                 const prize = pickWeighted(prizes.map(p => [p, p.pickUpFixedRate > 0 ? p.pickUpFixedRate : 1] as [typeof p, number]));
                 if (prize) {
                     if (prize.resourceType === 2) {
-                        const card = new Card(prize.resourceId);
+                        const card = withServer(new Card(prize.resourceId), gacha.server);
                         await card.init();
                         if (card.isExist) return { kind: 'member', rarity: card.rarity || lot.rarityConstraint, card, pickUp: prize.pickUpType === 2 };
                     } else {
-                        const support = new SupportCard(prize.resourceId);
+                        const support = withServer(new SupportCard(prize.resourceId), gacha.server);
                         await support.init();
                         if (support.isExist) return { kind: 'support', rarity: support.rarity || lot.rarityConstraint, supportCard: support, pickUp: prize.pickUpType === 2 };
                     }
@@ -145,21 +147,21 @@ async function drawUpgraded(gacha: Gacha): Promise<GachaDrawResult | undefined> 
         }
     }
     // 兜底: 从 SSR/SR 卡池中选
-    const pool = (await store.cardList()).filter(c => c.rarity >= 3);
+    const pool = (await storeFor(gacha.server).cardList()).filter(c => c.rarity >= 3);
     const picked = pickWeighted(pool.map(c => [c, 1] as [typeof c, number]));
     if (!picked) return undefined;
-    const card = new Card(picked.id);
+    const card = withServer(new Card(picked.id), gacha.server);
     await card.init();
     return { kind: 'member', rarity: card.rarity, card, pickUp: false };
 }
 
 /** 找当前开放的卡池(优先非限定) */
-export async function getCurrentGacha(): Promise<Gacha | undefined> {
-    const rows = await store.gachaList();
+export async function getCurrentGacha(server: Server = defaultServer()): Promise<Gacha | undefined> {
+    const rows = await storeFor(server).gachaList();
     const now = new Date();
     const open: Gacha[] = [];
     for (const row of rows) {
-        const g = new Gacha(row.id);
+        const g = withServer(new Gacha(row.id), server);
         await g.init();
         if (g.isOpen(now)) open.push(g);
     }
@@ -171,7 +173,7 @@ export async function getCurrentGacha(): Promise<Gacha | undefined> {
 export async function getGachaRates(gacha: Gacha): Promise<Record<string, number> | undefined> {
     const lotGroupId = gacha.row?.lotGroupId;
     if (!lotGroupId) return undefined;
-    const lots = await store.gachaLotsByGroup(lotGroupId);
+    const lots = await storeFor(gacha.server).gachaLotsByGroup(lotGroupId);
     if (lots.length === 0) return undefined;
     const total = lots.reduce((sum, l) => sum + l.weight, 0);
     const byRarity: Record<string, number> = {};

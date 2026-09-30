@@ -79,16 +79,20 @@ export class DiskCache {
         return await p;
     }
 
-    /** 启动清理: 删除不属于当前/上一个 dataVersion 的 masterdata 表目录 */
-    async pruneMasterdataVersions(keepVersions: string[]): Promise<void> {
-        const dir = path.join(config.cacheDir, 'masterdata', 'tables');
+    /**
+     * 启动清理: 删除**本区域**目录下不属于当前 dataVersion 的表目录。
+     * 布局为 masterdata/tables/{server}/{dataVersion}/, 必须带 region 只清理自己的子树,
+     * 否则一次区域刷新会把其它区域已缓存的表删掉。
+     */
+    async pruneMasterdataVersions(server: string, keepVersions: string[]): Promise<void> {
+        const dir = path.join(config.cacheDir, 'masterdata', 'tables', server);
         const keep = new Set(keepVersions.filter(Boolean));
         try {
             const entries = await fs.readdir(dir);
             for (const e of entries) {
                 if (!keep.has(e)) {
                     await fs.rm(path.join(dir, e), { recursive: true, force: true });
-                    logger('cache', `pruned masterdata version ${e}`);
+                    logger('cache', `pruned masterdata version ${server}/${e}`);
                 }
             }
         } catch {

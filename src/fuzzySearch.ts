@@ -1,12 +1,29 @@
 import { isInteger } from './routers/utils';
 import { logger } from './logger';
+import { Server } from './types/Server';
 
-// 移植自 tsugu-bangdream-bot backend/src/fuzzySearch.ts, 配置改为由 fuzzyIndex 注入
+// 移植自 tsugu-bangdream-bot backend/src/fuzzySearch.ts, 配置改为由 fuzzyIndex 注入。
+// 各区域的曲库/卡池不同, 别名索引必须按区域分片。
 export interface FuzzySearchConfig {
     [type: string]: { [key: string]: (string | number)[] };
 }
 
-export let fuzzyConfig: FuzzySearchConfig = {};
+const configs = new Map<Server, FuzzySearchConfig>();
+
+export function getFuzzyConfig(server: Server): FuzzySearchConfig {
+    return configs.get(server) ?? {};
+}
+
+/** dataVersion 变化时清空(不传区域则全清) */
+export function resetFuzzyConfig(server?: Server): void {
+    if (server) {
+        configs.delete(server);
+        wholeNameIndexes.delete(server);
+    } else {
+        configs.clear();
+        wholeNameIndexes.clear();
+    }
+}
 
 /**
  * 整体同名规则只认这两类: 搜索词整体与乐团名/角色名完全同名时, 直接按该分类查询。
@@ -19,11 +36,11 @@ function normalizeName(name: string): string {
     return name.toLowerCase().replace(/[^0-9a-z一-鿿぀-ヿ가-힯]/g, '');
 }
 
-/** 归一化名字 -> 分类键与 id(整体同名规则用; 由 setFuzzyConfig 构建) */
-let wholeNameIndex = new Map<string, { type: string; id: string | number }[]>();
+/** 归一化名字 -> 分类键与 id(整体同名规则用; 由 setFuzzyConfig 构建), 按区域分片 */
+const wholeNameIndexes = new Map<Server, Map<string, { type: string; id: string | number }[]>>();
 
-export function setFuzzyConfig(config: FuzzySearchConfig): void {
-    fuzzyConfig = config;
+export function setFuzzyConfig(server: Server, config: FuzzySearchConfig): void {
+    configs.set(server, config);
     const index = new Map<string, { type: string; id: string | number }[]>();
     for (const type of WHOLE_NAME_TYPES) {
         for (const [key, aliases] of Object.entries(config[type] ?? {})) {
@@ -39,8 +56,8 @@ export function setFuzzyConfig(config: FuzzySearchConfig): void {
             }
         }
     }
-    wholeNameIndex = index;
-    logger('fuzzySearch', `fuzzy config updated: ${Object.keys(config).join(', ')}, whole-name entries: ${index.size}`);
+    wholeNameIndexes.set(server, index);
+    logger('fuzzySearch', `[${server}] fuzzy config updated: ${Object.keys(config).join(', ')}, whole-name entries: ${index.size}`);
 }
 
 export interface FuzzySearchResult {
@@ -78,10 +95,11 @@ function isValidRelationStr(_relationStr: string): boolean {
         rangePattern.test(_relationStr);
 }
 
-export function fuzzySearch(keyword: string): FuzzySearchResult {
+export function fuzzySearch(server: Server, keyword: string): FuzzySearchResult {
+    const fuzzyConfig = getFuzzyConfig(server);
     // 整体同名规则: 与乐团名/角色名完全同名时只按该分类查询, 不再分词、不做子串回退。
     // 否则 "Ave Mujica" 会被拆成 ave/mujica, 经 _all 子串回退误配 "unravel"(含 ave)。
-    const wholeName = wholeNameIndex.get(normalizeName(keyword));
+    const wholeName = wholeNameIndexes.get(server)?.get(normalizeName(keyword));
     if (wholeName && wholeName.length > 0) {
         const matches: FuzzySearchResult = {};
         for (const { type, id } of wholeName) {

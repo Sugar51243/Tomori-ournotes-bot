@@ -6,9 +6,10 @@ import { drawOurNotesPreview, ChartPreviewHeader, NOTE_SPEED_DEFAULT } from '../
 import { getNoteSkin } from '../data/noteSkin';
 import { imageBuffer, jacketUrl } from '../data/assets';
 import { logger } from '../logger';
+import { Server, withServer } from '../types/Server';
 
-async function loadCover(assetName: string): Promise<Image | undefined> {
-    const buf = await imageBuffer(jacketUrl(assetName), `images/jacket/${assetName}.webp`);
+async function loadCover(server: Server, assetName: string): Promise<Image | undefined> {
+    const buf = await imageBuffer(jacketUrl(server, assetName), `images/jacket/${server}/${assetName}.webp`);
     if (!buf) return undefined;
     try {
         return await loadImage(buf);
@@ -20,8 +21,8 @@ async function loadCover(assetName: string): Promise<Image | undefined> {
 /**
  * 谱面预览图: songId + difficultyId(0-3) + mirror + compress -> PNG/JPEG Buffer
  */
-export async function drawSongChart(songId: number, difficultyId: number, compress: boolean, mirror: boolean, noteSpeed: number = NOTE_SPEED_DEFAULT): Promise<Array<Buffer | string>> {
-    const song = new Song(songId);
+export async function drawSongChart(server: Server, songId: number, difficultyId: number, compress: boolean, mirror: boolean, noteSpeed: number = NOTE_SPEED_DEFAULT): Promise<Array<Buffer | string>> {
+    const song = withServer(new Song(songId), server);
     await song.init();
     if (!song.isExist) {
         return ['错误: 歌曲不存在'];
@@ -58,7 +59,7 @@ export async function drawSongChart(songId: number, difficultyId: number, compre
         author,
         diff: difficultyName,
         level: chart.level,
-        cover: song.row ? await loadCover(song.row.jacketAssetName) : undefined
+        cover: song.row ? await loadCover(song.server, song.row.jacketAssetName) : undefined
     };
 
     // 官方音符皮肤素材(失败时渲染器自动退化为内置形状)

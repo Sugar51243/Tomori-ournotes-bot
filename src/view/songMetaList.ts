@@ -1,82 +1,128 @@
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, SKRSContext2D } from '@napi-rs/canvas';
 import { Song } from '../types/Song';
-import { drawTitle, outputFinalBuffer } from '../components/list';
+import { Server } from '../types/Server';
+import { config } from '../config';
+import { songServerRows, ServerRow } from '../data/serverInfo';
+import { drawTitle, drawMetaBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H } from '../components/list';
 import { drawBackground } from '../components/background';
-import { diffColorList } from '../components/OurNotesPreview';
-import { FONT_STACK } from '../components/fonts';
+import { drawMultiServerTable, multiServerTableHeight } from '../components/multiServerTable';
+import { cjkFontFamily } from '../components/fonts';
+import { fillTextCentered } from '../components/draw';
+
+/**
+ * 全歌曲表(tsugu songMeta 对应物)。
+ *
+ * **每首歌只显示一个服务器的一行**(不再逐服铺开):
+ * 数据优先取港澳台服, 港澳台没有该曲时改取日服 —— 行首国旗标明这一行取自哪个服。
+ * 行内是该服的 EZ/NM/HD/EX 定数与物量(即出分信息)以及上架时间, 全部为静态 master 数据。
+ *
+ * 85 首 × 每首一行仍然很长, 故按 SONGS_PER_PAGE 分页, 每页一张图。
+ */
 
 const WIDTH = 900;
-const ROW_H = 26;
-const HEADER_H = 48;
+const MARGIN = 16;
+/** 页头 = 主标题带 + 副信息带(说明文字), 两者都是纯色底 */
+const HEADER_H = TITLE_BAND_H + META_BAND_H;
+const SONG_HEAD_H = 28;
+const SONG_GAP = 6;
 
-/** 全歌曲 meta 表(tsugu songMeta 对应物) */
-export async function drawSongMetaList(songs: Song[], compress: boolean): Promise<Array<Buffer | string>> {
-    const height = HEADER_H + 16 + songs.length * ROW_H + 16;
-    const canvas = createCanvas(WIDTH, height);
-    const ctx = canvas.getContext('2d');
+/** 单首歌区块的高度: 区块头 + 一行数据(列头只在页首画一次) */
+function songBlockHeight(): number {
+    return SONG_HEAD_H + multiServerTableHeight(1, false) + SONG_GAP;
+}
 
-    // 全歌曲列表跨多个乐队, 使用 other 背景
-    await drawBackground(ctx, WIDTH, height);
-    drawTitle(ctx, WIDTH, `全歌曲列表 (${songs.length})`);
-
-    // 表头
-    const cols = [
-        { x: 8, w: 62, label: 'ID' },
-        { x: 70, w: 256, label: '标题' },
-        { x: 326, w: 118, label: '乐队' },
-        { x: 444, w: 78, label: '分类' },
-        { x: 522, w: 52, label: 'EZ' },
-        { x: 574, w: 52, label: 'NM' },
-        { x: 626, w: 52, label: 'HD' },
-        { x: 678, w: 52, label: 'EX' },
-        { x: 730, w: 78, label: '音符(EX)' },
-        { x: 808, w: 84, label: '时长' }
-    ];
-    ctx.fillStyle = 'rgba(24, 26, 44, 0.82)';
-    ctx.fillRect(0, HEADER_H, WIDTH, ROW_H);
-    ctx.fillStyle = '#FFF';
-    // 表头含中文(标题/乐队), 需 CJK 字体栈
-    ctx.font = `14px ${FONT_STACK}`;
-    ctx.textAlign = 'left';
+/** 区块头: 曲目 ID / 标题 / 乐队 / 分类 / 时长 */
+function drawSongHeader(ctx: SKRSContext2D, y: number, song: Song): void {
     ctx.textBaseline = 'middle';
-    for (const c of cols) ctx.fillText(c.label, c.x + 4, HEADER_H + ROW_H / 2, c.w - 8);
+    ctx.fillStyle = 'rgba(24, 26, 44, 0.72)';
+    ctx.fillRect(MARGIN, y, WIDTH - MARGIN * 2, SONG_HEAD_H - 4);
 
-    const diffKeys = ['easy', 'normal', 'hard', 'expert'];
-    songs.forEach((song, i) => {
-        const y = HEADER_H + ROW_H + i * ROW_H;
-        if (i % 2 === 1) {
-            ctx.fillStyle = 'rgba(255,255,255,0.04)';
-            ctx.fillRect(0, y, WIDTH, ROW_H);
-        }
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#BBB';
-        ctx.font = '13px "Arial"';
-        ctx.fillText(String(song.songId), cols[0].x + 4, y + ROW_H / 2, cols[0].w - 8);
-        ctx.fillStyle = '#FFF';
-        ctx.font = `14px ${FONT_STACK}`;
-        ctx.fillText(song.musicTitle, cols[1].x + 4, y + ROW_H / 2, cols[1].w - 8);
-        ctx.fillStyle = '#BBB';
-        ctx.font = `13px ${FONT_STACK}`;
-        ctx.fillText(song.bandName, cols[2].x + 4, y + ROW_H / 2, cols[2].w - 8);
-        // 分类
+    ctx.font = cjkFontFamily(15);
+    ctx.fillStyle = '#FFF';
+    ctx.fillText(song.musicTitle, MARGIN + 8, y + (SONG_HEAD_H - 4) / 2, 420);
+
+    ctx.font = '13px "Arial"';
+    ctx.fillStyle = '#BBB';
+    ctx.fillText(String(song.songId), MARGIN + 436, y + (SONG_HEAD_H - 4) / 2, 70);
+
+    ctx.font = cjkFontFamily(13);
+    ctx.fillStyle = '#9aa4b2';
+    ctx.fillText(song.bandName, MARGIN + 508, y + (SONG_HEAD_H - 4) / 2, 150);
+    if (song.categories.length) {
+        ctx.fillText(song.categories.join('/'), MARGIN + 662, y + (SONG_HEAD_H - 4) / 2, WIDTH - MARGIN - 732);
+    }
+    // 时长取自全区共享的谱面站点, 与区域无关, 故放在区块头
+    const duration = song.durationMs
+        ? `${Math.floor(song.durationMs / 60000)}:${String(Math.round(song.durationMs / 1000) % 60).padStart(2, '0')}`
+        : '-';
+    ctx.font = '13px "Arial"';
+    ctx.fillStyle = '#BBB';
+    ctx.textAlign = 'right';
+    ctx.fillText(duration, WIDTH - MARGIN - 8, y + (SONG_HEAD_H - 4) / 2, 54);
+    ctx.textAlign = 'left';
+}
+
+/**
+ * 出分表每曲只显示一行, 选哪一行: 港澳台 -> 日服 -> 其它(都要求该服**自己有**该曲数据),
+ * 全都没有时才退而取任意一行(可能是借来的数据)。
+ */
+function pickRow(rows: ServerRow[]): ServerRow | undefined {
+    return rows.find(r => r.server === 'tw' && r.hasOwn)
+        ?? rows.find(r => r.server === 'jp' && r.hasOwn)
+        ?? rows.find(r => r.hasOwn)
+        ?? rows.find(r => r.exists);
+}
+
+export async function drawSongMetaList(songs: Song[], servers: Server[], compress: boolean): Promise<Array<Buffer | string>> {
+    const songsPerPage = Math.max(1, config.songsPerPage);
+    const pages: Song[][] = [];
+    for (let i = 0; i < songs.length; i += songsPerPage) {
+        pages.push(songs.slice(i, i + songsPerPage));
+    }
+    if (pages.length === 0) {
+        return ['错误: 没有可显示的歌曲'];
+    }
+
+    const blockH = songBlockHeight();
+    const buffers: Buffer[] = [];
+    for (let p = 0; p < pages.length; p++) {
+        const page = pages[p];
+
+        // 先把这一页每一首的取数行算出来: 列头取自第一条可用行, 保证列宽对齐
+        const pageRows = await Promise.all(page.map(song => songServerRows(song.songId, servers).then(pickRow)));
+        const labels = pageRows.find(r => r && r.cells.length)?.cells.map(([label]) => label) ?? [];
+
+        const headerH = labels.length ? multiServerTableHeight(1) : 0;
+        const height = HEADER_H + MARGIN + headerH + page.length * blockH + MARGIN;
+        const canvas = createCanvas(WIDTH, height);
+        const ctx = canvas.getContext('2d');
+
+        await drawBackground(ctx, WIDTH, height, { server: servers[0] });
+        const pageLabel = pages.length > 1 ? `（第 ${p + 1}/${pages.length} 页）` : '';
+        drawTitle(ctx, WIDTH, `全歌曲列表 (${songs.length})${pageLabel}`);
+
+        // 取数规则画在副信息带的正中间: 半截压在背景图上的话既不像标题栏, 也会显得没对齐
+        const metaMidY = drawMetaBand(ctx, WIDTH);
+        ctx.font = cjkFontFamily(12);
         ctx.fillStyle = '#9aa4b2';
-        ctx.font = `13px ${FONT_STACK}`;
-        ctx.fillText(song.categories.join('/'), cols[3].x + 4, y + ROW_H / 2, cols[3].w - 8);
-        for (let d = 0; d < 4; d++) {
-            const diff = song.difficulty[d];
-            if (!diff || !diff.playLevel) continue;
-            ctx.fillStyle = diffColorList[diffKeys[d]] ?? '#888';
-            ctx.font = '13px "Arial"';
-            ctx.fillText(`${diff.displayLevel}`, cols[4 + d].x + 4, y + ROW_H / 2, cols[4 + d].w - 8);
-        }
-        // EX 音符数与时长
-        const ex = song.difficulty[3];
-        ctx.fillStyle = '#BBB';
-        ctx.font = '12px "Arial"';
-        ctx.fillText(ex?.fullComboCount ? String(ex.fullComboCount) : '-', cols[8].x + 4, y + ROW_H / 2, cols[8].w - 8);
-        const duration = song.durationMs ? `${Math.floor(song.durationMs / 60000)}:${String(Math.round(song.durationMs / 1000) % 60).padStart(2, '0')}` : '-';
-        ctx.fillText(duration, cols[9].x + 4, y + ROW_H / 2, cols[9].w - 8);
-    });
+        fillTextCentered(ctx, '每曲一行 · 优先港澳台服, 无则改取日服', MARGIN, metaMidY, WIDTH - MARGIN * 2);
 
-    return [await outputFinalBuffer(canvas, compress)];
+        // 列头只在页首画一次
+        let y = HEADER_H + MARGIN;
+        if (labels.length) {
+            y = await drawMultiServerTable(ctx, MARGIN, y, WIDTH - MARGIN * 2, [], { headerOnly: true, labels });
+        }
+
+        for (let i = 0; i < page.length; i++) {
+            drawSongHeader(ctx, y, page[i]);
+            const row = pageRows[i];
+            if (row) {
+                await drawMultiServerTable(ctx, MARGIN, y + SONG_HEAD_H, WIDTH - MARGIN * 2, [row], { showHeader: false });
+            }
+            y += blockH;
+        }
+
+        buffers.push(await outputFinalBuffer(canvas, compress));
+    }
+    return buffers;
 }

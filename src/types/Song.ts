@@ -1,8 +1,10 @@
 import { LiveMusicRow, LiveMusicScoreRow } from './MasterData';
-import { store, t } from '../data/masterdata';
+import { regionFor } from '../data/region';
 import { jacketUrl } from '../data/assets';
 import { Band } from './Band';
 import { attributeName } from './Card';
+import { config } from '../config';
+import { Server, defaultServer, withServer } from './Server';
 
 export interface SongDifficulty {
     /** 0=easy 1=normal 2=hard 3=expert */
@@ -16,6 +18,8 @@ export interface SongDifficulty {
 
 export class Song {
     songId: number;
+    /** 该实体由哪个区域渲染(文本/素材来源); 默认主服, 由调用方在 init() 前指定 */
+    server: Server = defaultServer();
     isExist = false;
     row?: LiveMusicRow;
     scores: LiveMusicScoreRow[] = [];
@@ -50,6 +54,7 @@ export class Song {
     }
 
     async init(): Promise<void> {
+        const { store, t } = regionFor(this.server);
         this.row = await store.songById(this.songId);
         if (!this.row) return;
         this.isExist = true;
@@ -63,7 +68,7 @@ export class Song {
         this.bandName = '';
         this.bandId = this.row.bandIDs[0] ?? 0;
         if (this.row.bandIDs.length > 0) {
-            const band = new Band(this.row.bandIDs[0]);
+            const band = withServer(new Band(this.row.bandIDs[0]), this.server);
             await band.init();
             this.bandName = band.bandName;
         }
@@ -76,7 +81,7 @@ export class Song {
         this.startAt = this.row.startAt;
         // 乐曲属性(红/蓝/绿/黄/紫): 与卡片同一套类型, 影响「乐曲属性加成」
         this.musicType = this.row.musicType ?? 0;
-        this.attribute = this.musicType ? await attributeName(this.musicType) : '';
+        this.attribute = this.musicType ? await attributeName(this.server, this.musicType) : '';
 
         const chartIds = [this.row.easyID, this.row.normalID, this.row.hardID, this.row.expertID];
         this.difficulty = chartIds.map((chartId, i) => {
@@ -140,7 +145,7 @@ export class Song {
     }
 
     jacketUrl(): string {
-        return this.row ? jacketUrl(this.row.jacketAssetName) : '';
+        return this.row ? jacketUrl(this.server, this.row.jacketAssetName) : '';
     }
 
     /** 供 match() 使用的模糊搜索目标对象 */

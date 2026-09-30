@@ -35,15 +35,31 @@ export function drawDatablock(ctx: SKRSContext2D, startX: number, startY: number
     return y;
 }
 
+/** 页头主标题带高度 */
+export const TITLE_BAND_H = 48;
+/** 页头副信息带高度(服务器行/说明文字) */
+export const META_BAND_H = 32;
+
 /** 页头横幅(半透明, 以便透出背景图) */
 export function drawTitle(ctx: SKRSContext2D, width: number, text: string, color = 'rgba(24, 26, 44, 0.82)'): void {
     ctx.fillStyle = color;
-    ctx.fillRect(0, 0, width, 48);
+    ctx.fillRect(0, 0, width, TITLE_BAND_H);
     ctx.fillStyle = '#FFF';
     ctx.font = `22px ${FONT_STACK}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 16, 24, width - 32);
+    ctx.fillText(text, 16, TITLE_BAND_H / 2, width - 32);
+}
+
+/**
+ * 副信息带的纯色底(紧贴主标题带下方)。
+ * 副标题、服务器行这类内容必须画在这条带子内 —— 否则半截压在背景图上, 看起来既不属于标题栏也没对齐。
+ * @returns 这条带子的垂直中线 y, 供调用方做居中绘制
+ */
+export function drawMetaBand(ctx: SKRSContext2D, width: number, color = 'rgba(24, 26, 44, 0.82)'): number {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, TITLE_BAND_H, width, META_BAND_H);
+    return TITLE_BAND_H + META_BAND_H / 2;
 }
 
 /** 最终输出(tsugu outputFinalBuffer 简化版) */

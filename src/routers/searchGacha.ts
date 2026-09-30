@@ -1,7 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { listToBase64 } from './utils';
-import { isServerList } from '../types/Server';
+import { isServerList, pickServers, Server, withServer } from '../types/Server';
 import { middleware } from './middleware';
 import { Gacha } from '../types/Gacha';
 import { drawGachaDetail } from '../view/gachaDetail';
@@ -20,7 +20,7 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { gachaId, compress } = req.body;
         try {
-            const result = await commandGacha(gachaId, compress);
+            const result = await commandGacha(pickServers(req.body), gachaId, compress);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -29,10 +29,15 @@ router.post(
     }
 );
 
-export async function commandGacha(gachaId: number, compress: boolean): Promise<Array<Buffer | string>> {
-    const gacha = new Gacha(gachaId);
-    await gacha.init();
-    if (!gacha.isExist) {
+export async function commandGacha(servers: Server[], gachaId: number, compress: boolean): Promise<Array<Buffer | string>> {
+    // 主体取第一个收录该卡池的区域
+    let gacha: Gacha | undefined;
+    for (const server of servers) {
+        const candidate = withServer(new Gacha(gachaId), server);
+        await candidate.init();
+        if (candidate.isExist) { gacha = candidate; break; }
+    }
+    if (!gacha) {
         return ['错误: 该卡池不存在'];
     }
     return drawGachaDetail(gacha, compress);

@@ -3,3 +3,6 @@ dist/
 cache/
 .env
 *.log
+test_result/
+scripts/
+output/

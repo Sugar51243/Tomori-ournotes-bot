@@ -1,9 +1,13 @@
 import { BandRow } from './MasterData';
-import { store, t } from '../data/masterdata';
+import { regionFor } from '../data/region';
 import { bandLogoUrl } from '../data/assets';
+import { config } from '../config';
+import { Server, defaultServer } from './Server';
 
 export class Band {
     bandId: number;
+    /** 该实体由哪个区域渲染(文本/素材来源); 默认主服, 由调用方在 init() 前指定 */
+    server: Server = defaultServer();
     isExist = false;
     row?: BandRow;
     bandName = '';
@@ -15,6 +19,7 @@ export class Band {
     }
 
     async init(): Promise<void> {
+        const { store, t } = regionFor(this.server);
         this.row = await store.bandById(this.bandId);
         if (!this.row) return;
         this.isExist = true;
@@ -24,6 +29,6 @@ export class Band {
     }
 
     logoUrl(): string {
-        return bandLogoUrl(this.bandId);
+        return bandLogoUrl(this.server, this.bandId);
     }
 }

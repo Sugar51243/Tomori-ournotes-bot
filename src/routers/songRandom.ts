@@ -1,7 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { listToBase64 } from './utils';
-import { isServer } from '../types/Server';
+import { isServer, pickServers } from '../types/Server';
 import { middleware } from './middleware';
 import { isFuzzySearchResult } from '../fuzzySearch';
 import { searchSongs, textToFuzzyResult } from '../search';
@@ -22,15 +22,17 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { text, fuzzySearchResult, compress } = req.body;
         try {
+            const servers = pickServers(req.body);
+            const server = servers[0];
             let candidates;
             if (fuzzySearchResult) {
-                candidates = await searchSongs(fuzzySearchResult);
+                candidates = await searchSongs(server, fuzzySearchResult);
             } else if (text) {
-                candidates = await searchSongs(textToFuzzyResult(text));
+                candidates = await searchSongs(server, textToFuzzyResult(server, text));
             } else {
-                candidates = await searchSongs({});
+                candidates = await searchSongs(server, {});
             }
-            const result = await drawSongRandom(candidates, compress);
+            const result = await drawSongRandom(candidates, servers, compress);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);

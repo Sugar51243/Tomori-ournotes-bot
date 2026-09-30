@@ -1,12 +1,15 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { isInteger, listToBase64 } from './utils';
-import { isServerList } from '../types/Server';
+import { isServerList, pickServers, Server, withServer } from '../types/Server';
 import { middleware } from './middleware';
 import { isFuzzySearchResult, FuzzySearchResult } from '../fuzzySearch';
 import { drawCardDetail } from '../view/cardDetail';
 import { drawCardList } from '../view/cardList';
-import { searchCards, textToFuzzyResult, resolveCard, CardKind } from '../search';
+import { searchCards, textToFuzzyResult, isMemberCard, CardKind, AnyCard } from '../search';
+import { cardServerRows } from '../data/serverInfo';
+import { Card } from '../types/Card';
+import { SupportCard } from '../types/SupportCard';
 
 /**
  * 卡片查询的公共实现与路由工厂。
@@ -16,26 +19,41 @@ import { searchCards, textToFuzzyResult, resolveCard, CardKind } from '../search
  * - /searchSupportCard 仅支援卡
  * 角色卡与支援卡 ID 空间重叠, 故按 ID 查询时以入口(cardType)区分。
  */
-export async function commandCard(input: string | FuzzySearchResult, compress: boolean, cardType: CardKind = 'auto'): Promise<Array<Buffer | string>> {
+export async function commandCard(servers: Server[], input: string | FuzzySearchResult, compress: boolean, cardType: CardKind = 'auto'): Promise<Array<Buffer | string>> {
     if (typeof input === 'string' && isInteger(input)) {
-        const card = await resolveCard(parseInt(input, 10), cardType);
-        if (!card) {
-            return ['错误: 该卡不存在'];
+        const cardId = parseInt(input, 10);
+        // auto: 先角色卡后支援卡; 逐服找第一个收录该卡的区域作为主体渲染源
+        const kinds: Array<'member' | 'support'> = cardType === 'auto' ? ['member', 'support'] : [cardType];
+        for (const kind of kinds) {
+            const rows = await cardServerRows(cardId, kind, servers);
+            // 必须用「自己有数据」的服做主体: 借港澳台数据的行渲染不出该实体本身
+        const bodyServer = rows.find(r => r.hasOwn)?.server;
+            if (!bodyServer) continue;
+            const card: AnyCard = kind === 'support'
+                ? withServer(new SupportCard(cardId), bodyServer)
+                : withServer(new Card(cardId), bodyServer);
+            await card.init();
+            if (!card.isExist) continue;
+            return drawCardDetail(card, rows, compress);
         }
-        return drawCardDetail(card, compress);
+        return ['错误: 该卡不存在'];
     }
-    const matches = typeof input === 'string' ? textToFuzzyResult(input) : input;
+    const bodyServer = servers[0];
+    const matches = typeof input === 'string' ? textToFuzzyResult(bodyServer, input) : input;
     if (Object.keys(matches).length == 0) {
         return ['错误: 没有有效的关键词'];
     }
-    const cards = await searchCards(matches, cardType);
+    const cards = await searchCards(bodyServer, matches, cardType);
     if (cards.length === 0) {
         return ['错误: 没有搜索到符合条件的卡牌'];
     }
     if (cards.length === 1) {
-        return drawCardDetail(cards[0], compress);
+        const card = cards[0];
+        const member = isMemberCard(card);
+        const rows = await cardServerRows(member ? card.cardId : card.supportCardId, member ? 'member' : 'support', servers);
+        return drawCardDetail(card, rows, compress);
     }
-    return drawCardList(cards, compress);
+    return drawCardList(bodyServer, cards, compress);
 }
 
 /**
@@ -64,7 +82,8 @@ export function createCardRouter(kind: CardKind, acceptCardType = false): expres
         }
         try {
             const effectiveKind: CardKind = acceptCardType ? (cardType ?? kind) : kind;
-            const result = await commandCard(text || fuzzySearchResult, compress, effectiveKind);
+            const servers = pickServers(req.body);
+            const result = await commandCard(servers, text || fuzzySearchResult, compress, effectiveKind);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);

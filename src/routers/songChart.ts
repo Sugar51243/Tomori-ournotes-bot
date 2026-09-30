@@ -1,7 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { listToBase64 } from './utils';
-import { isServerList } from '../types/Server';
+import { isServerList, pickServers } from '../types/Server';
 import { middleware } from './middleware';
 import { drawSongChart } from '../view/songChart';
 import { NOTE_SPEED_DEFAULT, NOTE_SPEED_MIN, NOTE_SPEED_MAX } from '../components/OurNotesPreview';
@@ -26,7 +26,7 @@ router.post(
         const { songId, difficultyId = 3, compress, mirror = false, noteSpeed, speed } = req.body;
         const resolvedSpeed = noteSpeed ?? speed ?? NOTE_SPEED_DEFAULT;
         try {
-            const result = await drawSongChart(songId, difficultyId, compress, mirror, resolvedSpeed);
+            const result = await drawSongChart(pickServers(req.body)[0], songId, difficultyId, compress, mirror, resolvedSpeed);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);

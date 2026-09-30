@@ -1,66 +1,106 @@
 import { config } from '../config';
+import { Server, serverProfile } from '../types/Server';
 import { cachedFetch } from './cachedFetch';
 
 /**
  * 资源 URL 构造与图片加载。
- * 所有资源 URL 规则集中在此(均已对真实 CDN 逐条验证)。
+ * URL 形状: {assetBase}/{assetRegion}/{locale}/{路径}/{文件名}/{文件名}.webp
+ *
+ * 各区域 CDN 上的语言目录并不齐全 —— jp 只有 ja,拼 zh-Hans 会 404,
+ * 所以取图语言一律经 assetLocaleFor 收敛到该区域真实存在的目录。
+ * chart-site 是全站共享资源,不带区域段。
  */
 
-export function jacketUrl(jacketAssetName: string, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/Image/Jacket/${jacketAssetName}/${jacketAssetName}.webp`;
+function profile(server: Server) {
+    return serverProfile(server);
 }
 
-// 资源 URL 规则(已逐一对真实 CDN 验证): {locale}/{路径}/{文件名}/{文件名}.webp
-export function cardFullArtUrl(cardId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/MemberCard/${cardId}/member_full/member_full.webp`;
+/** 把请求语言收敛到该区域 CDN 上真实存在的目录 */
+export function assetLocaleFor(server: Server, locale?: string): string {
+    const p = profile(server);
+    if (locale && p.assetLocales.includes(locale)) return locale;
+    if (p.assetLocales.includes(p.defaultLocale)) return p.defaultLocale;
+    return p.assetLocales[0] ?? p.defaultLocale;
 }
 
-export function cardThumbUrl(cardId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/MemberCard/${cardId}/member_thumbnail/member_thumbnail.webp`;
+/** 通用资源 URL: path 形如 "Image/Jacket/jkt_001_100020/jkt_001_100020.webp" */
+export function assetUrl(server: Server, path: string, locale?: string): string {
+    return `${config.assetBase}/${profile(server).assetRegion}/${assetLocaleFor(server, locale)}/${path}`;
 }
 
-export function characterIconUrl(characterId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/Character/Image/${characterId}/character_face_icon/character_face_icon.webp`;
+/**
+ * 图片磁盘缓存键。区域与语言都进键 —— URL 两者都含,
+ * 否则 tw 与 jp 的同名素材会互相覆盖。
+ */
+export function assetCacheKey(server: Server, logicalPath: string, locale?: string): string {
+    return `images/${server}/${assetLocaleFor(server, locale)}/${logicalPath}`;
 }
 
-export function characterSpriteUrl(characterId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/Character/Image/${characterId}/character_sprite/character_sprite.webp`;
+export function jacketUrl(server: Server, jacketAssetName: string, locale?: string): string {
+    return assetUrl(server, `Image/Jacket/${jacketAssetName}/${jacketAssetName}.webp`, locale);
 }
 
-export function supportCardThumbUrl(assetId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/SupportCard/${assetId}/snap_thumbnail/snap_thumbnail.webp`;
+// 资源 URL 规则(已逐一对真实 CDN 验证): {region}/{locale}/{路径}/{文件名}/{文件名}.webp
+export function cardFullArtUrl(server: Server, cardId: number, locale?: string): string {
+    return assetUrl(server, `MemberCard/${cardId}/member_full/member_full.webp`, locale);
 }
 
-export function supportCardFullUrl(assetId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/SupportCard/${assetId}/snap_full/snap_full.webp`;
+export function cardThumbUrl(server: Server, cardId: number, locale?: string): string {
+    return assetUrl(server, `MemberCard/${cardId}/member_thumbnail/member_thumbnail.webp`, locale);
+}
+
+export function characterIconUrl(server: Server, characterId: number, locale?: string): string {
+    return assetUrl(server, `Character/Image/${characterId}/character_face_icon/character_face_icon.webp`, locale);
+}
+
+export function characterSpriteUrl(server: Server, characterId: number, locale?: string): string {
+    return assetUrl(server, `Character/Image/${characterId}/character_sprite/character_sprite.webp`, locale);
+}
+
+export function supportCardThumbUrl(server: Server, assetId: number, locale?: string): string {
+    return assetUrl(server, `SupportCard/${assetId}/snap_thumbnail/snap_thumbnail.webp`, locale);
+}
+
+export function supportCardFullUrl(server: Server, assetId: number, locale?: string): string {
+    return assetUrl(server, `SupportCard/${assetId}/snap_full/snap_full.webp`, locale);
 }
 
 /** 道具图标: imagePath 形如 "Item/exp/item_icon_exp_004" */
-export function itemIconUrl(imagePath: string, locale = config.defaultLocale): string {
+export function itemIconUrl(server: Server, imagePath: string, locale?: string): string {
     const name = imagePath.split('/').at(-1) ?? imagePath;
-    return `${config.assetBase}/${locale}/${imagePath}/${name}.webp`;
+    return assetUrl(server, `${imagePath}/${name}.webp`, locale);
 }
 
 /** 贴纸: stampAsset 形如 "Stamp/illust/stamp_illust_tomori_001" / "Stamp/text/stamp_text_001"(无缩略图变体) */
-export function stampUrl(stampAsset: string, locale = config.defaultLocale): string {
+export function stampUrl(server: Server, stampAsset: string, locale?: string): string {
     const name = stampAsset.split('/').at(-1) ?? stampAsset;
-    return `${config.assetBase}/${locale}/${stampAsset}/${name}.webp`;
+    return assetUrl(server, `${stampAsset}/${name}.webp`, locale);
 }
 
-export function bandLogoUrl(bandId: number, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/Band/${bandId}/band_logo/band_logo.webp`;
+export function bandLogoUrl(server: Server, bandId: number, locale?: string): string {
+    return assetUrl(server, `Band/${bandId}/band_logo/band_logo.webp`, locale);
 }
 
-export function gachaBannerUrl(bannerAssetName: string, locale = config.defaultLocale): string {
+export function gachaBannerUrl(server: Server, bannerAssetName: string, locale?: string): string {
     // bannerAssetName 形如 "Gacha/Banner/gacha_banner_00001"
-    return `${config.assetBase}/${locale}/${bannerAssetName}/${bannerAssetName.split('/').at(-1)}.webp`;
+    return assetUrl(server, `${bannerAssetName}/${bannerAssetName.split('/').at(-1)}.webp`, locale);
 }
 
 /** 背景图: 名称形如 bg_adv_0103 / OfflineBonusBackground */
-export function backgroundUrl(name: string, locale = config.defaultLocale): string {
-    return `${config.assetBase}/${locale}/Image/Background/${name}/${name}.webp`;
+export function backgroundUrl(server: Server, name: string, locale?: string): string {
+    return assetUrl(server, `Image/Background/${name}/${name}.webp`, locale);
 }
 
+/** 服务器国旗图标(bdon.moe 站点资源, 与素材 CDN 不同源) */
+export function flagUrl(flagFile: string): string {
+    return `${config.moenotesSiteBase}/flags/${flagFile}.svg`;
+}
+
+export function flagCacheKey(flagFile: string): string {
+    return `images/flags/${flagFile}.svg`;
+}
+
+/** 谱面站点是全区共享的, 不带区域段 */
 export function chartManifestUrl(musicId: number, difficulty: string): string {
     return `${config.assetBase}/chart-site/charts/${musicId}_${difficulty}.json`;
 }

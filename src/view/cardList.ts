@@ -7,6 +7,7 @@ import { wrapTextLines } from '../components/draw';
 import { AnyCard, isMemberCard } from '../search';
 import { SupportCard } from '../types/SupportCard';
 import { FONT_STACK } from '../components/fonts';
+import { Server } from '../types/Server';
 
 /**
  * 卡片分区展示(卡片列表 / 卡池 PICK UP 共用):
@@ -39,7 +40,7 @@ async function loadThumb(card: AnyCard): Promise<{ img?: Awaited<ReturnType<type
     const w = member ? MEMBER_THUMB_W : SUPPORT_THUMB_W;
     const h = member ? MEMBER_THUMB_H : SUPPORT_THUMB_H;
     if (!card.assetId) return { w, h };
-    const url = member ? cardThumbUrl(card.cardId) : supportCardThumbUrl(card.assetId);
+    const url = member ? cardThumbUrl(card.server, card.cardId) : supportCardThumbUrl(card.server, card.assetId);
     const key = member ? `images/card/${card.assetId}_thumb.png` : `images/support/${card.assetId}_thumb.png`;
     const buf = await imageBuffer(url, key);
     if (!buf) return { w, h };
@@ -200,13 +201,13 @@ export async function drawCardSections(ctx: Ctx, cards: AnyCard[], startY: numbe
 }
 
 /** 卡片搜索列表图 */
-export async function drawCardList(cards: AnyCard[], compress: boolean): Promise<Array<Buffer | string>> {
+export async function drawCardList(server: Server, cards: AnyCard[], compress: boolean): Promise<Array<Buffer | string>> {
     const height = HEADER_H + cardSectionsHeight(cards) + MARGIN;
     const canvas = createCanvas(WIDTH, height);
     const ctx = canvas.getContext('2d');
 
     // 结果全部同属一个乐队时用该乐队背景, 混合结果用 other 背景
-    await drawBackground(ctx, WIDTH, height, commonBandId(cards.map(c => c.bandId)));
+    await drawBackground(ctx, WIDTH, height, { server, bandId: commonBandId(cards.map(c => c.bandId)) });
     const members = cards.filter(isMemberCard);
     const supports = cards.filter(c => !isMemberCard(c));
     const summary = [

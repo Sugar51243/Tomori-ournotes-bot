@@ -6,6 +6,7 @@ import { drawBackground, commonBandId } from '../components/background';
 import { diffColorList } from '../components/OurNotesPreview';
 import { wrapTextLines } from '../components/draw';
 import { FONT_STACK } from '../components/fonts';
+import { Server } from '../types/Server';
 
 const COL_COUNT = 2;
 const CARD_W = 460;
@@ -13,7 +14,7 @@ const CARD_H = 110;
 const MARGIN = 16;
 
 /** 歌曲搜索列表图(2 列卡片网格) */
-export async function drawSongList(songs: Song[], compress: boolean): Promise<Array<Buffer | string>> {
+export async function drawSongList(server: Server, songs: Song[], compress: boolean): Promise<Array<Buffer | string>> {
     const rows = Math.ceil(songs.length / COL_COUNT);
     const width = MARGIN + COL_COUNT * (CARD_W + MARGIN);
     const height = 56 + rows * (CARD_H + MARGIN) + MARGIN;
@@ -21,7 +22,7 @@ export async function drawSongList(songs: Song[], compress: boolean): Promise<Ar
     const ctx = canvas.getContext('2d');
 
     // 结果全部同属一个乐队时用该乐队背景, 混合结果用 other 背景
-    await drawBackground(ctx, width, height, commonBandId(songs.map(s => s.bandId)));
+    await drawBackground(ctx, width, height, { server, bandId: commonBandId(songs.map(s => s.bandId)) });
     drawTitle(ctx, width, `共 ${songs.length} 首歌曲`);
 
     for (let i = 0; i < songs.length; i++) {
@@ -38,7 +39,7 @@ export async function drawSongList(songs: Song[], compress: boolean): Promise<Ar
         ctx.fillStyle = '#222';
         ctx.fillRect(x + 8, y + 8, 94, 94);
         if (song.row) {
-            const cover = await imageBuffer(jacketUrl(song.row.jacketAssetName), `images/jacket/${song.row.jacketAssetName}.webp`);
+            const cover = await imageBuffer(jacketUrl(song.server, song.row.jacketAssetName), `images/jacket/${song.server}/${song.row.jacketAssetName}.webp`);
             if (cover) {
                 try {
                     ctx.drawImage(await loadImage(cover), x + 8, y + 8, 94, 94);

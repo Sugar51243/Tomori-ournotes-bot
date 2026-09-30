@@ -1,5 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
-import { Gacha, formatGameDate } from '../types/Gacha';
+import { Gacha, formatGameDate, zoneLabel } from '../types/Gacha';
 import { getGachaRates } from '../gacha/simulate';
 import { imageBuffer, gachaBannerUrl } from '../data/assets';
 import { drawTitle, drawDatablock, outputFinalBuffer } from '../components/list';
@@ -11,7 +11,7 @@ import { FONT_STACK } from '../components/fonts';
 
 /**
  * 卡池详情信息图:
- * 横幅、名称、说明、期间(UTC+8)、状态、招募券、真实出货率, 以及 **PICK UP 对象** ——
+ * 横幅、名称、说明、期间(按区域时区)、状态、招募券、真实出货率, 以及 **PICK UP 对象** ——
  * 复用卡片列表的分区格式(角色卡 3:4 两列 / 留影 16:9 通栏), 不拉伸图片。
  */
 const WIDTH = CARD_LIST_WIDTH;
@@ -28,7 +28,7 @@ export async function drawGachaDetail(gacha: Gacha, compress: boolean): Promise<
     // ---- 横幅: 先取图确定贴合尺寸(排版与画布高度都依赖它) ----
     let banner: Awaited<ReturnType<typeof loadImage>> | undefined;
     if (gacha.bannerAssetName) {
-        const buf = await imageBuffer(gachaBannerUrl(gacha.bannerAssetName), `images/gacha/${gacha.gachaId}_banner.webp`).catch(() => undefined);
+        const buf = await imageBuffer(gachaBannerUrl(gacha.server, gacha.bannerAssetName), `images/gacha/${gacha.server}/${gacha.gachaId}_banner.webp`).catch(() => undefined);
         if (buf) {
             try {
                 banner = await loadImage(buf);
@@ -41,8 +41,8 @@ export async function drawGachaDetail(gacha: Gacha, compress: boolean): Promise<
 
     // ---- 期间 / 状态 / 券 / 出货率 ----
     const rows: [string, string][] = [
-        ['开始', gacha.startAt ? `${formatGameDate(gacha.startAt)} (UTC+8)` : '-'],
-        ['结束', gacha.endAt ? `${formatGameDate(gacha.endAt)} (UTC+8)` : '-'],
+        ['开始', gacha.startAt ? `${formatGameDate(gacha.startAt, gacha.server)} (${zoneLabel(gacha.server)})` : '-'],
+        ['结束', gacha.endAt ? `${formatGameDate(gacha.endAt, gacha.server)} (${zoneLabel(gacha.server)})` : '-'],
         ['状态', `${gacha.isOpen() ? '开放中' : '已结束'}${gacha.isLimited ? ' · 限定' : ''}${gacha.isNewMember ? ' · 新成员' : ''}`]
     ];
     if (gacha.ticketName) rows.push(['招募券', gacha.ticketName]);

@@ -1,6 +1,7 @@
 import { ensureFuzzyIndex } from './fuzzyIndex';
-import { store } from './data/masterdata';
+import { refreshRegion, storeFor } from './data/region';
 import { fuzzySearch, match, checkRelationList, FuzzySearchResult } from './fuzzySearch';
+import { Server, withServer } from './types/Server';
 import { Song } from './types/Song';
 import { Card } from './types/Card';
 import { SupportCard } from './types/SupportCard';
@@ -8,14 +9,15 @@ import { Character } from './types/Character';
 import { Gacha } from './types/Gacha';
 import { Event } from './types/Event';
 
-/** 按模糊搜索结果过滤歌曲 */
-export async function searchSongs(matches: FuzzySearchResult): Promise<Song[]> {
-    await store.refresh();
-    await ensureFuzzyIndex();
+/** 按模糊搜索结果过滤歌曲(全部来自指定区域) */
+export async function searchSongs(server: Server, matches: FuzzySearchResult): Promise<Song[]> {
+    await refreshRegion(server);
+    await ensureFuzzyIndex(server);
+    const store = storeFor(server);
     const rows = await store.songs();
     const songs: Song[] = [];
     for (const row of rows) {
-        const song = new Song(row.id);
+        const song = withServer(new Song(row.id), server);
         await song.init();
         if (match(matches, song.fuzzyTarget(), ['songLevels'])) {
             songs.push(song);
@@ -41,33 +43,34 @@ export function isMemberCard(card: AnyCard): card is Card {
  * 按 ID 解析卡片(成员卡与支援卡 ID 空间重叠, 故需类型判别):
  * - kind='auto': 先按成员卡查, 未命中再按支援卡查
  */
-export async function resolveCard(cardId: number, kind: CardKind = 'auto'): Promise<AnyCard | undefined> {
+export async function resolveCard(server: Server, cardId: number, kind: CardKind = 'auto'): Promise<AnyCard | undefined> {
     if (kind !== 'support') {
-        const card = new Card(cardId);
+        const card = withServer(new Card(cardId), server);
         await card.init();
         if (card.isExist) return card;
         if (kind === 'member') return undefined;
     }
-    const support = new SupportCard(cardId);
+    const support = withServer(new SupportCard(cardId), server);
     await support.init();
     return support.isExist ? support : undefined;
 }
 
 /** 按模糊搜索结果过滤卡片(默认成员卡+支援卡一起查, 成员卡在前) */
-export async function searchCards(matches: FuzzySearchResult, kind: CardKind = 'auto'): Promise<AnyCard[]> {
-    await store.refresh();
-    await ensureFuzzyIndex();
+export async function searchCards(server: Server, matches: FuzzySearchResult, kind: CardKind = 'auto'): Promise<AnyCard[]> {
+    await refreshRegion(server);
+    await ensureFuzzyIndex(server);
+    const store = storeFor(server);
     const cards: AnyCard[] = [];
     if (kind !== 'support') {
         for (const row of await store.cardList()) {
-            const card = new Card(row.id);
+            const card = withServer(new Card(row.id), server);
             await card.init();
             if (match(matches, card.fuzzyTarget(), [])) cards.push(card);
         }
     }
     if (kind !== 'member') {
         for (const row of await store.supportCardList()) {
-            const support = new SupportCard(row.id);
+            const support = withServer(new SupportCard(row.id), server);
             await support.init();
             if (match(matches, support.fuzzyTarget(), [])) cards.push(support);
         }
@@ -76,13 +79,13 @@ export async function searchCards(matches: FuzzySearchResult, kind: CardKind = '
 }
 
 /** 按模糊搜索结果过滤角色 */
-export async function searchCharacters(matches: FuzzySearchResult): Promise<Character[]> {
-    await store.refresh();
-    await ensureFuzzyIndex();
-    const rows = await store.characters();
+export async function searchCharacters(server: Server, matches: FuzzySearchResult): Promise<Character[]> {
+    await refreshRegion(server);
+    await ensureFuzzyIndex(server);
+    const rows = await storeFor(server).characters();
     const characters: Character[] = [];
     for (const row of rows) {
-        const c = new Character(row.id);
+        const c = withServer(new Character(row.id), server);
         await c.init();
         if (match(matches, c.fuzzyTarget(), [])) {
             characters.push(c);
@@ -92,13 +95,13 @@ export async function searchCharacters(matches: FuzzySearchResult): Promise<Char
 }
 
 /** 按模糊搜索结果过滤卡池 */
-export async function searchGachas(matches: FuzzySearchResult): Promise<Gacha[]> {
-    await store.refresh();
-    await ensureFuzzyIndex();
-    const rows = await store.gachaList();
+export async function searchGachas(server: Server, matches: FuzzySearchResult): Promise<Gacha[]> {
+    await refreshRegion(server);
+    await ensureFuzzyIndex(server);
+    const rows = await storeFor(server).gachaList();
     const gachas: Gacha[] = [];
     for (const row of rows) {
-        const g = new Gacha(row.id);
+        const g = withServer(new Gacha(row.id), server);
         await g.init();
         if (match(matches, g.fuzzyTarget(), [])) {
             gachas.push(g);
@@ -108,13 +111,13 @@ export async function searchGachas(matches: FuzzySearchResult): Promise<Gacha[]>
 }
 
 /** 按模糊搜索结果过滤活动 */
-export async function searchEvents(matches: FuzzySearchResult): Promise<Event[]> {
-    await store.refresh();
-    await ensureFuzzyIndex();
-    const rows = await store.eventList();
+export async function searchEvents(server: Server, matches: FuzzySearchResult): Promise<Event[]> {
+    await refreshRegion(server);
+    await ensureFuzzyIndex(server);
+    const rows = await storeFor(server).eventList();
     const events: Event[] = [];
     for (const row of rows) {
-        const e = new Event(row.id);
+        const e = withServer(new Event(row.id), server);
         await e.init();
         if (match(matches, e.fuzzyTarget(), [])) {
             events.push(e);
@@ -123,7 +126,7 @@ export async function searchEvents(matches: FuzzySearchResult): Promise<Event[]>
     return events;
 }
 
-/** text -> 模糊搜索结果 */
-export function textToFuzzyResult(text: string): FuzzySearchResult {
-    return fuzzySearch(text);
+/** text -> 模糊搜索结果(按区域分片的索引) */
+export function textToFuzzyResult(server: Server, text: string): FuzzySearchResult {
+    return fuzzySearch(server, text);
 }

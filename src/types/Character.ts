@@ -1,10 +1,14 @@
 import { CharacterRow } from './MasterData';
-import { store, t } from '../data/masterdata';
+import { regionFor } from '../data/region';
 import { characterIconUrl, characterSpriteUrl } from '../data/assets';
 import { Band } from './Band';
+import { config } from '../config';
+import { Server, defaultServer, withServer } from './Server';
 
 export class Character {
     characterId: number;
+    /** 该实体由哪个区域渲染(文本/素材来源); 默认主服, 由调用方在 init() 前指定 */
+    server: Server = defaultServer();
     isExist = false;
     row?: CharacterRow;
     characterName = '';
@@ -34,6 +38,7 @@ export class Character {
     }
 
     async init(): Promise<void> {
+        const { store, t } = regionFor(this.server);
         this.row = await store.characterById(this.characterId);
         if (!this.row) return;
         this.isExist = true;
@@ -58,17 +63,17 @@ export class Character {
         this.hobby = this.row.hobbyTextId ? await t(this.row.hobbyTextId) : '';
         this.favoriteFood = this.row.favoriteFoodTextId ? await t(this.row.favoriteFoodTextId) : '';
         this.playable = !this.row.isNonPlayable;
-        const band = new Band(this.bandId);
+        const band = withServer(new Band(this.bandId), this.server);
         await band.init();
         this.bandName = band.bandName;
     }
 
     iconUrl(): string {
-        return characterIconUrl(this.characterId);
+        return characterIconUrl(this.server, this.characterId);
     }
 
     spriteUrl(): string {
-        return characterSpriteUrl(this.characterId);
+        return characterSpriteUrl(this.server, this.characterId);
     }
 
     fuzzyTarget(): Record<string, unknown> {

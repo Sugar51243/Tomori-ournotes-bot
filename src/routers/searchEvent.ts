@@ -1,10 +1,12 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { isInteger, listToBase64 } from './utils';
-import { isServerList } from '../types/Server';
+import { isServerList, pickServers } from '../types/Server';
 import { middleware } from './middleware';
 import { isFuzzySearchResult, FuzzySearchResult } from '../fuzzySearch';
 import { Event } from '../types/Event';
+import { Server, withServer } from '../types/Server';
+import { eventServerRows } from '../data/serverInfo';
 import { drawEventDetail } from '../view/eventDetail';
 import { searchEvents, textToFuzzyResult } from '../search';
 
@@ -30,7 +32,8 @@ router.post(
         }
 
         try {
-            const result = await commandEvent(text || fuzzySearchResult, compress);
+            const servers = pickServers(req.body);
+            const result = await commandEvent(servers, text || fuzzySearchResult, compress);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -39,24 +42,30 @@ router.post(
     }
 );
 
-export async function commandEvent(input: string | FuzzySearchResult, compress: boolean): Promise<Array<Buffer | string>> {
+export async function commandEvent(servers: Server[], input: string | FuzzySearchResult, compress: boolean): Promise<Array<Buffer | string>> {
     if (typeof input === 'string' && isInteger(input)) {
-        const event = new Event(parseInt(input, 10));
-        await event.init();
-        if (!event.isExist) {
+        const eventId = parseInt(input, 10);
+        const rows = await eventServerRows(eventId, servers);
+        // 必须用「自己有数据」的服做主体: 借港澳台数据的行渲染不出该实体本身
+        const bodyServer = rows.find(r => r.hasOwn)?.server;
+        if (!bodyServer) {
             return ['错误: 该活动不存在'];
         }
-        return drawEventDetail(event, compress);
+        const event = withServer(new Event(eventId), bodyServer);
+        await event.init();
+        return drawEventDetail(event, rows, compress);
     }
-    const matches = typeof input === 'string' ? textToFuzzyResult(input) : input;
+    const bodyServer = servers[0];
+    const matches = typeof input === 'string' ? textToFuzzyResult(bodyServer, input) : input;
     if (Object.keys(matches).length == 0) {
         return ['错误: 没有有效的关键词'];
     }
-    const events = await searchEvents(matches);
+    const events = await searchEvents(bodyServer, matches);
     if (events.length === 0) {
         return ['没有搜索到符合条件的活动'];
     }
-    return drawEventDetail(events[0], compress);
+    const rows = await eventServerRows(events[0].eventId, servers);
+    return drawEventDetail(events[0], rows, compress);
 }
 
 export { router as searchEventRouter };

@@ -1,6 +1,7 @@
-import { masterdataClient } from './client';
-import { t, tSync, preloadText, resetTextCache } from './text';
+import { clientFor } from './client';
+import { createTextResolver, TextResolver } from './text';
 import { resetSkillCache } from '../skills';
+import { Server } from '../../types/Server';
 import {
     LiveMusicRow, LiveMusicScoreRow, BandRow, CharacterRow,
     MemberCardRow, GachaRow, EventRow, GachaLotRow, GachaPrizeRow,
@@ -9,10 +10,13 @@ import {
 import { logger } from '../../logger';
 
 /**
- * MasterDataStore 门面: 各类表懒加载 + 常用查找。
+ * MasterDataStore 门面(每个区域一个实例): 各类表懒加载 + 常用查找。
  * dataVersion 变化时由 refresh() 重置文本缓存与各表引用(懒加载重新拉取)。
  */
-class MasterDataStore {
+export class MasterDataStore {
+    readonly server: Server;
+    readonly text: TextResolver;
+
     private liveMusic: LiveMusicRow[] | undefined;
     private liveMusicScore: LiveMusicScoreRow[] | undefined;
     private bands: BandRow[] | undefined;
@@ -26,19 +30,24 @@ class MasterDataStore {
     private items: ItemRow[] | undefined;
     private stamps: StampRow[] | undefined;
 
+    constructor(server: Server) {
+        this.server = server;
+        this.text = createTextResolver(server);
+    }
+
     async refresh(): Promise<void> {
-        const changed = await masterdataClient.refreshIfVersionChanged();
+        const changed = await clientFor(this.server).refreshIfVersionChanged();
         if (changed) {
             this.liveMusic = this.liveMusicScore = this.bands = this.characterRows = this.cards = undefined;
             this.gachas = this.events = this.gachaLots = this.gachaPrizes = this.supportCards = this.items = this.stamps = undefined;
-            resetTextCache();
-            resetSkillCache();
-            logger('masterdata', 'store reset, tables will be lazily reloaded');
+            this.text.reset();
+            resetSkillCache(this.server);
+            logger('masterdata', `[${this.server}] store reset, tables will be lazily reloaded`);
         }
     }
 
     async songs(): Promise<LiveMusicRow[]> {
-        this.liveMusic ??= await masterdataClient.getTable<LiveMusicRow>('MasterLiveMusic');
+        this.liveMusic ??= await clientFor(this.server).getTable<LiveMusicRow>('MasterLiveMusic');
         return this.liveMusic;
     }
 
@@ -47,7 +56,7 @@ class MasterDataStore {
     }
 
     async songScores(): Promise<LiveMusicScoreRow[]> {
-        this.liveMusicScore ??= await masterdataClient.getTable<LiveMusicScoreRow>('MasterLiveMusicScore');
+        this.liveMusicScore ??= await clientFor(this.server).getTable<LiveMusicScoreRow>('MasterLiveMusicScore');
         return this.liveMusicScore;
     }
 
@@ -57,7 +66,7 @@ class MasterDataStore {
     }
 
     async bandList(): Promise<BandRow[]> {
-        this.bands ??= await masterdataClient.getTable<BandRow>('MasterBand');
+        this.bands ??= await clientFor(this.server).getTable<BandRow>('MasterBand');
         return this.bands;
     }
 
@@ -66,7 +75,7 @@ class MasterDataStore {
     }
 
     async characters(): Promise<CharacterRow[]> {
-        this.characterRows ??= await masterdataClient.getTable<CharacterRow>('MasterCharacter');
+        this.characterRows ??= await clientFor(this.server).getTable<CharacterRow>('MasterCharacter');
         return this.characterRows;
     }
 
@@ -75,7 +84,7 @@ class MasterDataStore {
     }
 
     async cardList(): Promise<MemberCardRow[]> {
-        this.cards ??= await masterdataClient.getTable<MemberCardRow>('MasterMemberCard');
+        this.cards ??= await clientFor(this.server).getTable<MemberCardRow>('MasterMemberCard');
         return this.cards;
     }
 
@@ -84,7 +93,7 @@ class MasterDataStore {
     }
 
     async gachaList(): Promise<GachaRow[]> {
-        this.gachas ??= await masterdataClient.getTable<GachaRow>('MasterGacha');
+        this.gachas ??= await clientFor(this.server).getTable<GachaRow>('MasterGacha');
         return this.gachas;
     }
 
@@ -93,7 +102,7 @@ class MasterDataStore {
     }
 
     async eventList(): Promise<EventRow[]> {
-        this.events ??= await masterdataClient.getTable<EventRow>('MasterEvent');
+        this.events ??= await clientFor(this.server).getTable<EventRow>('MasterEvent');
         return this.events;
     }
 
@@ -103,7 +112,7 @@ class MasterDataStore {
 
     /** 卡池抽奖组(真实概率数据) */
     async gachaLotList(): Promise<GachaLotRow[]> {
-        this.gachaLots ??= await masterdataClient.getTable<GachaLotRow>('MasterGachaLot');
+        this.gachaLots ??= await clientFor(this.server).getTable<GachaLotRow>('MasterGachaLot');
         return this.gachaLots;
     }
 
@@ -113,7 +122,7 @@ class MasterDataStore {
 
     /** 卡池奖品(组内资源清单) */
     async gachaPrizeList(): Promise<GachaPrizeRow[]> {
-        this.gachaPrizes ??= await masterdataClient.getTable<GachaPrizeRow>('MasterGachaPrize');
+        this.gachaPrizes ??= await clientFor(this.server).getTable<GachaPrizeRow>('MasterGachaPrize');
         return this.gachaPrizes;
     }
 
@@ -122,7 +131,7 @@ class MasterDataStore {
     }
 
     async supportCardList(): Promise<SupportCardRow[]> {
-        this.supportCards ??= await masterdataClient.getTable<SupportCardRow>('MasterSupportCard');
+        this.supportCards ??= await clientFor(this.server).getTable<SupportCardRow>('MasterSupportCard');
         return this.supportCards;
     }
 
@@ -131,7 +140,7 @@ class MasterDataStore {
     }
 
     async itemList(): Promise<ItemRow[]> {
-        this.items ??= await masterdataClient.getTable<ItemRow>('MasterItem');
+        this.items ??= await clientFor(this.server).getTable<ItemRow>('MasterItem');
         return this.items;
     }
 
@@ -140,7 +149,7 @@ class MasterDataStore {
     }
 
     async stampList(): Promise<StampRow[]> {
-        this.stamps ??= await masterdataClient.getTable<StampRow>('MasterStamp');
+        this.stamps ??= await clientFor(this.server).getTable<StampRow>('MasterStamp');
         return this.stamps;
     }
 
@@ -152,18 +161,18 @@ class MasterDataStore {
     async itemName(id: number): Promise<string> {
         if (!id) return '';
         const row = await this.itemById(id);
-        return row ? await t(row.nameTextId) : '';
+        return row ? await this.text.t(row.nameTextId) : '';
     }
 
     /** 音乐分类名称(按分类 id 列表, 取其中一条分类行的本地化文本) */
     async musicCategoryNames(categoryIds: number[]): Promise<string[]> {
         if (!categoryIds?.length) return [];
-        const rows = await masterdataClient.getTable<MusicCategoryRow>('MasterLiveMusicCategory').catch(() => []);
+        const rows = await clientFor(this.server).getTable<MusicCategoryRow>('MasterLiveMusicCategory').catch(() => []);
         const names: string[] = [];
         for (const id of categoryIds) {
             const row = rows.find(r => (r.musicCategories ?? []).includes(id));
             if (!row) continue;
-            const name = await t(row.textKey);
+            const name = await this.text.t(row.textKey);
             if (name && name !== row.textKey) names.push(name);
         }
         return names;
@@ -172,13 +181,10 @@ class MasterDataStore {
     /** 应援色(主色 + 副色, 十六进制) */
     async penLightColors(colorId: number): Promise<string[]> {
         if (!colorId) return [];
-        const rows = await masterdataClient.getTable<PenLightColorRow>('MasterLiveMusicPenLightColor').catch(() => []);
+        const rows = await clientFor(this.server).getTable<PenLightColorRow>('MasterLiveMusicPenLightColor').catch(() => []);
         const row = rows.find(r => r.id === colorId);
         if (!row) return [];
         return [row.mainColor, row.sub1Color, row.sub2Color, row.sub3Color, row.sub4Color]
             .filter((c): c is string => !!c && /^#[0-9A-Fa-f]{6}$/.test(c));
     }
 }
-
-export const store = new MasterDataStore();
-export { t, tSync, preloadText };

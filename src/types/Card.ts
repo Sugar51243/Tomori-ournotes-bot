@@ -1,8 +1,10 @@
 import { MemberCardRow } from './MasterData';
-import { store, t } from '../data/masterdata';
+import { regionFor } from '../data/region';
 import { cardFullArtUrl, cardThumbUrl } from '../data/assets';
 import { Character } from './Character';
-import { getSkill, getSkills, getMaxLevel, SkillInfo } from '../data/skills';
+import { getSkills, getMaxLevel, SkillInfo } from '../data/skills';
+import { config } from '../config';
+import { Server, defaultServer, withServer } from './Server';
 
 export const cardTypeNames: Record<number, string> = {
     1: 'Red', 2: 'Blue', 3: 'Green', 4: 'Yellow', 5: 'Purple'
@@ -23,10 +25,10 @@ export const cardTypeTextIds: Record<number, string> = {
 };
 
 /** 属性名(优先官方本地化文本并去掉"属性/タイプ/Type"等后缀, 缺失时退回颜色名) */
-export async function attributeName(cardType: number): Promise<string> {
+export async function attributeName(server: Server, cardType: number): Promise<string> {
     const textId = cardTypeTextIds[cardType];
     if (textId) {
-        const name = await t(textId);
+        const name = await regionFor(server).t(textId);
         if (name && name !== textId) {
             // 官方名形如 绯红属性 / 緋紅屬性 / 紅赤タイプ / Ruby Type / 레드 타입
             const stripped = name.replace(/\s*(属性|屬性|タイプ|타입|types?|type)$/i, '').trim();
@@ -38,6 +40,8 @@ export async function attributeName(cardType: number): Promise<string> {
 
 export class Card {
     cardId: number;
+    /** 该实体由哪个区域渲染(文本/素材来源); 默认主服, 由调用方在 init() 前指定 */
+    server: Server = defaultServer();
     isExist = false;
     row?: MemberCardRow;
     cardName = '';
@@ -63,6 +67,7 @@ export class Card {
     }
 
     async init(): Promise<void> {
+        const { store, t } = regionFor(this.server);
         this.row = await store.cardById(this.cardId);
         if (!this.row) return;
         this.isExist = true;
@@ -71,19 +76,19 @@ export class Card {
         this.characterId = this.row.characterID;
         this.rarity = this.row.rarity;
         this.cardType = this.row.cardType;
-        this.attribute = await attributeName(this.row.cardType);
+        this.attribute = await attributeName(this.server, this.row.cardType);
         this.performancePowerMax = this.row.performancePowerMax;
         this.technicPowerMax = this.row.technicPowerMax;
         this.visualPowerMax = this.row.visualPowerMax;
         this.assetId = this.row.assetID;
         this.startAt = String(this.row.startAt ?? '');
-        const character = new Character(this.characterId);
+        const character = withServer(new Character(this.characterId), this.server);
         await character.init();
         this.characterName = character.characterName;
         this.bandId = character.bandId;
         // 等级上限与技能(技能解析较慢, 失败不影响卡片本身)
-        this.maxLevel = await getMaxLevel('MasterMemberCardLevel', this.row.memberCardLevelGroup ?? 0).catch(() => undefined);
-        this.skills = await getSkills([
+        this.maxLevel = await getMaxLevel(this.server, 'MasterMemberCardLevel', this.row.memberCardLevelGroup ?? 0).catch(() => undefined);
+        this.skills = await getSkills(this.server, [
             ['leader', this.row.leaderSkillID, '队长技能'],
             ['live', this.row.liveSkillID, '演出技能'],
             ['gekisou', this.row.gekisouSkillID, '击奏技能']
@@ -95,11 +100,11 @@ export class Card {
     }
 
     fullArtUrl(): string {
-        return cardFullArtUrl(this.cardId);
+        return cardFullArtUrl(this.server, this.cardId);
     }
 
     thumbUrl(): string {
-        return cardThumbUrl(this.cardId);
+        return cardThumbUrl(this.server, this.cardId);
     }
 
     rarityLabel(): string {

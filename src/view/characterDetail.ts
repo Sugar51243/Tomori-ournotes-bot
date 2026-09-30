@@ -5,6 +5,8 @@ import { drawTitle, drawDatablock, outputFinalBuffer, DrawBlockRow } from '../co
 import { drawBackground } from '../components/background';
 import { wrapTextLines } from '../components/draw';
 import { FONT_STACK } from '../components/fonts';
+import { drawMultiServerTable } from '../components/multiServerTable';
+import { ServerRow } from '../data/serverInfo';
 
 /**
  * 角色详情信息图: 尽量展开全部信息 ——
@@ -115,10 +117,10 @@ function renderContent(ctx: SKRSContext2D, character: Character, boxH: number): 
     return by;
 }
 
-export async function drawCharacterDetail(character: Character, compress: boolean): Promise<Array<Buffer | string>> {
+export async function drawCharacterDetail(character: Character, rows: ServerRow[], compress: boolean): Promise<Array<Buffer | string>> {
     // 先取立绘(优先 sprite, 退回 face icon): 图片比例决定贴合框高度
-    const sprite = await imageBuffer(characterSpriteUrl(character.characterId), `images/character/${character.characterId}_sprite.png`).catch(() => undefined);
-    const icon = sprite ?? await imageBuffer(characterIconUrl(character.characterId), `images/character/${character.characterId}_icon.png`).catch(() => undefined);
+    const sprite = await imageBuffer(characterSpriteUrl(character.server, character.characterId), `images/character/${character.server}/${character.characterId}_sprite.png`).catch(() => undefined);
+    const icon = sprite ?? await imageBuffer(characterIconUrl(character.server, character.characterId), `images/character/${character.server}/${character.characterId}_icon.png`).catch(() => undefined);
     let portrait: Awaited<ReturnType<typeof loadImage>> | undefined;
     if (icon) {
         try {
@@ -128,14 +130,26 @@ export async function drawCharacterDetail(character: Character, compress: boolea
     const boxH = iconBoxHeight(portrait ? portrait.width / portrait.height : 1);
 
     // 先量后画: 同一段排版先跑在测量画布上, 取得内容高度后再建正式画布
-    const HEIGHT = renderContent(createCanvas(10, 10).getContext('2d'), character, boxH) + MARGIN;
+    const contentEnd = renderContent(createCanvas(10, 10).getContext('2d'), character, boxH);
+    const multiHeight = rows.length ? 34 + rows.length * 26 : 0;
+    const HEIGHT = contentEnd + multiHeight + MARGIN;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
-    await drawBackground(ctx, WIDTH, HEIGHT, character.bandId);
+    await drawBackground(ctx, WIDTH, HEIGHT, { server: character.server, bandId: character.bandId });
     drawTitle(ctx, WIDTH, '角色详情');
 
-    renderContent(ctx, character, boxH);
+    const endY = renderContent(ctx, character, boxH);
+    // 各服信息(单图多服: 每服一行, 行首国旗)
+    if (rows.length) {
+        ctx.fillStyle = '#3a5fa8';
+        ctx.fillRect(MARGIN, endY, 4, 20);
+        ctx.fillStyle = '#FFF';
+        ctx.font = `bold 17px ${FONT_STACK}`;
+        ctx.textBaseline = 'middle';
+        ctx.fillText('各服信息', MARGIN + 14, endY + 10);
+        await drawMultiServerTable(ctx, MARGIN, endY + 26, WIDTH - MARGIN * 2, rows);
+    }
     // 立绘按原始比例贴合框内(不拉伸)
     if (portrait) {
         const scale = Math.min(ICON_W / portrait.width, boxH / portrait.height);

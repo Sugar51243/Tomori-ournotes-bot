@@ -4,6 +4,8 @@ import { imageBuffer, cardFullArtUrl, supportCardFullUrl } from '../data/assets'
 import { drawTitle, outputFinalBuffer } from '../components/list';
 import { drawBackground } from '../components/background';
 import { wrapTextLines } from '../components/draw';
+import { drawMultiServerTable, multiServerTableHeight } from '../components/multiServerTable';
+import { ServerRow } from '../data/serverInfo';
 import { AnyCard, isMemberCard } from '../search';
 import { formatGameDateUTC8 } from '../types/Gacha';
 import { SkillInfo } from '../data/skills';
@@ -74,7 +76,7 @@ function buildRows(card: AnyCard): [string, string][] {
             ['技巧', powerText(card.technicPowerMax, true)],
             ['视觉', powerText(card.visualPowerMax, true)],
             ['等级上限', card.maxLevel ? `Lv${card.maxLevel}` : '-'],
-            ['实装', formatGameDateUTC8(card.startAt)],
+            ['实装', formatGameDateUTC8(card.startAt, card.server)],
             ['ID', String(card.cardId)]
         ];
     }
@@ -85,7 +87,7 @@ function buildRows(card: AnyCard): [string, string][] {
         ['技巧', powerText(card.technicPowerMax, false)],
         ['视觉', powerText(card.visualPowerMax, false)],
         ['等级上限', card.maxLevel ? `Lv${card.maxLevel}` : '-'],
-        ['实装', formatGameDateUTC8(card.startAt)],
+        ['实装', formatGameDateUTC8(card.startAt, card.server)],
         ['ID', String(card.supportCardId)]
     ];
 }
@@ -93,7 +95,7 @@ function buildRows(card: AnyCard): [string, string][] {
 /** 卡面图(角色卡 3:4 / 支援卡 16:9); 取不到时返回 undefined, 由调用方画占位块 */
 async function loadArt(card: AnyCard): Promise<Awaited<ReturnType<typeof loadImage>> | undefined> {
     if (!card.assetId) return undefined;
-    const url = isMemberCard(card) ? cardFullArtUrl(card.cardId) : supportCardFullUrl(card.assetId);
+    const url = isMemberCard(card) ? cardFullArtUrl(card.server, card.cardId) : supportCardFullUrl(card.server, card.assetId);
     const key = isMemberCard(card) ? `images/card/${card.assetId}_full.png` : `images/support/${card.assetId}_full.png`;
     const buf = await imageBuffer(url, key);
     if (!buf) return undefined;
@@ -104,10 +106,10 @@ async function loadArt(card: AnyCard): Promise<Awaited<ReturnType<typeof loadIma
     }
 }
 
-export async function drawCardDetail(card: AnyCard, compress: boolean): Promise<Array<Buffer | string>> {
+export async function drawCardDetail(card: AnyCard, rows: ServerRow[], compress: boolean): Promise<Array<Buffer | string>> {
     const member = isMemberCard(card);
     const blocks = buildSkillBlocks(card, member);
-    const rows = buildRows(card);
+    const infoRows = buildRows(card);
 
     // 卡面: 先取图并按原始比例算贴合尺寸 —— 卡面不再铺占位背景, 排版高度也随实际卡面收缩
     const art = await loadArt(card);
@@ -128,18 +130,20 @@ export async function drawCardDetail(card: AnyCard, compress: boolean): Promise<
     const nameLines = wrapTextLines(measure, card.cardName, infoWidth, 2);
     measure.font = `14px ${CJK}`;
     const descLines = !member && card.description ? wrapTextLines(measure, card.description, infoWidth, 4) : [];
-    const infoHeight = 36 + nameLines.length * 30 + 4 + rows.length * 22
+    const infoHeight = 36 + nameLines.length * 30 + 4 + infoRows.length * 22
         + (descLines.length ? 6 + descLines.length * 19 : 0);
 
     const SKILLS_Y = Math.max(ART_Y + artH, infoTop + infoHeight) + 18;
     const skillsHeight = blocks.length
         ? 34 + blocks.reduce((h, b) => h + 24 + b.lines.length * 17 + 10, 0)
         : 0;
-    const HEIGHT = SKILLS_Y + skillsHeight + 16;
+    // 各服信息块(单图多服: 每服一行, 行首国旗)
+    const multiHeight = rows.length ? multiServerTableHeight(rows.length) + 34 : 0;
+    const HEIGHT = SKILLS_Y + skillsHeight + multiHeight + 16;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
-    await drawBackground(ctx, WIDTH, HEIGHT, card.bandId);
+    await drawBackground(ctx, WIDTH, HEIGHT, { server: card.server, bandId: card.bandId });
     drawTitle(ctx, WIDTH, member ? '角色卡详情' : '支援卡详情');
 
     if (art) {
@@ -189,7 +193,7 @@ export async function drawCardDetail(card: AnyCard, compress: boolean): Promise<
 
     // 信息行
     ctx.font = `15px ${CJK}`;
-    for (const [key, value] of rows) {
+    for (const [key, value] of infoRows) {
         ctx.fillStyle = '#9aa4b2';
         ctx.fillText(`${key}`, infoLeft, y);
         ctx.fillStyle = '#FFF';
@@ -238,6 +242,18 @@ export async function drawCardDetail(card: AnyCard, compress: boolean): Promise<
             }
             sy += 10;
         }
+    }
+
+    // ---- 各服信息 ----
+    if (rows.length) {
+        const my = SKILLS_Y + skillsHeight + 18;
+        ctx.fillStyle = '#3a5fa8';
+        ctx.fillRect(16, my, 4, 20);
+        ctx.fillStyle = '#FFF';
+        ctx.font = `bold 17px ${CJK}`;
+        ctx.textBaseline = 'middle';
+        ctx.fillText('各服信息', 30, my + 10);
+        await drawMultiServerTable(ctx, 16, my + 26, WIDTH - 32, rows);
     }
 
     return [await outputFinalBuffer(canvas, compress)];

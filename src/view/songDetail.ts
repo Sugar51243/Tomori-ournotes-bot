@@ -7,12 +7,14 @@ import { drawBackground } from '../components/background';
 import { diffColorList } from '../components/OurNotesPreview';
 import { cardTypeColors } from '../types/Card';
 import { wrapTextLines } from '../components/draw';
+import { drawMultiServerTable } from '../components/multiServerTable';
+import { ServerRow } from '../data/serverInfo';
 import { FONT_STACK } from '../components/fonts';
 
 /**
  * 歌曲详情信息图: 尽量展开全部信息 ——
  * 封面、ID、标题(含假名/罗马音)、乐队、分类、演唱角色、上架时间、时长、BPM、应援色、
- * 四难度等级与音符数、词曲编。
+ * 四难度等级与音符数、词曲编, 以及各服差异表(每服一行, 行首国旗)。
  */
 const WIDTH = 720;
 const MARGIN = 16;
@@ -40,7 +42,7 @@ function drawPenLight(ctx: ReturnType<ReturnType<typeof createCanvas>['getContex
  * 内容排版(不含封面图片本体): 封面占位/ID 角标 → 右侧信息 → 难度明细 → 创作信息。
  * 返回内容结束 y, 供画布高度与绘制共用(同一段代码先跑在测量画布上即为预排版)。
  */
-function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, song: Song): number {
+async function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, song: Song, rows: ServerRow[]): Promise<number> {
     // ---- 封面占位 ----
     ctx.fillStyle = '#222';
     ctx.fillRect(JACKET_X, JACKET_Y, JACKET_SIZE, JACKET_SIZE);
@@ -68,7 +70,7 @@ function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['getConte
     infoRows.push(['乐队', song.bandName || '-']);
     if (song.categories.length) infoRows.push(['分类', song.categories.join(' / ')]);
     if (song.vocalNames.length) infoRows.push(['演唱', song.vocalNames.join('、')]);
-    infoRows.push(['上架时间', formatGameDateUTC8(song.startAt)]);
+    infoRows.push(['上架时间', formatGameDateUTC8(song.startAt, song.server)]);
     if (song.durationMs) {
         const totalSec = Math.round(song.durationMs / 1000);
         infoRows.push(['时长', `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')}`]);
@@ -125,33 +127,48 @@ function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['getConte
         dx += w + 10;
     }
 
+    // ---- 各服信息(单图多服: 每服一行, 行首国旗) ----
+    let y2 = diffY + 44;
+    if (rows.length > 0) {
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#3a5fa8';
+        ctx.fillRect(JACKET_X, y2, 4, 20);
+        ctx.fillStyle = '#FFF';
+        ctx.font = `bold 17px ${CJK}`;
+        ctx.textBaseline = 'middle';
+        ctx.fillText('各服信息', JACKET_X + 14, y2 + 10);
+        y2 += 26;
+        y2 = await drawMultiServerTable(ctx, JACKET_X, y2, WIDTH - 32, rows);
+        y2 += 10;
+    }
+
     // ---- 创作信息 ----
     ctx.textBaseline = 'top';
-    return drawDatablock(ctx, JACKET_X, diffY + 44, [
+    return drawDatablock(ctx, JACKET_X, y2, [
         { key: '作词', text: song.lyricist || '-' },
         { key: '作曲', text: song.composer || '-' },
         { key: '编曲', text: song.arranger || '-' }
     ], WIDTH - 32, { fontSize: 14 });
 }
 
-export async function drawSongDetail(song: Song, compress: boolean): Promise<Array<Buffer | string>> {
+export async function drawSongDetail(song: Song, rows: ServerRow[], compress: boolean): Promise<Array<Buffer | string>> {
     // 详情需要时长/BPM(需谱面 bundle), 按需加载
     await song.loadChartInfo();
 
     // 先量后画: 同一段排版先跑在测量画布上, 取得内容高度后建正式画布(避免底部大片空白)
-    const contentEnd = renderContent(createCanvas(10, 10).getContext('2d'), song);
+    const contentEnd = await renderContent(createCanvas(10, 10).getContext('2d'), song, rows);
     const HEIGHT = Math.max(contentEnd, JACKET_Y + JACKET_SIZE) + MARGIN;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
-    await drawBackground(ctx, WIDTH, HEIGHT, song.bandId);
+    await drawBackground(ctx, WIDTH, HEIGHT, { server: song.server, bandId: song.bandId });
     drawTitle(ctx, WIDTH, '歌曲详情');
 
-    renderContent(ctx, song);
+    await renderContent(ctx, song, rows);
 
     // 封面图片 + ID 角标(位置固定, 不影响排版; 角标须画在封面之上)
     if (song.row) {
-        const cover = await imageBuffer(jacketUrl(song.row.jacketAssetName), `images/jacket/${song.row.jacketAssetName}.webp`);
+        const cover = await imageBuffer(jacketUrl(song.server, song.row.jacketAssetName), `images/jacket/${song.server}/${song.row.jacketAssetName}.webp`);
         if (cover) {
             try {
                 ctx.drawImage(await loadImage(cover), JACKET_X, JACKET_Y, JACKET_SIZE, JACKET_SIZE);

@@ -1,5 +1,6 @@
-import { masterdataClient } from './masterdata/client';
-import { t } from './masterdata/text';
+import { clientFor } from './masterdata/client';
+import { regionFor } from './region';
+import { Server } from '../types/Server';
 
 /**
  * 技能解析: 主数据中的技能由「技能表(名称/描述模板) + 效果表(各级数值)」组成,
@@ -114,31 +115,41 @@ function evalCondition(cond: string, effects: Row[]): boolean | undefined {
     return undefined;
 }
 
-// ---- 内存索引: 按 id 建表, 避免每次技能查询都扫描整张表 ----
+// ---- 内存索引: 按「区域 + 表名」建索引, 避免每次技能查询都扫描整张表 ----
 const skillRowCache = new Map<string, Map<number, Row>>();
 const effectRowCache = new Map<string, Map<number, Row[]>>();
 
-/** dataVersion 变化时清空索引(由 masterdata store 调用) */
-export function resetSkillCache(): void {
-    skillRowCache.clear();
-    effectRowCache.clear();
+/** dataVersion 变化时清空索引; 不传区域则全清 */
+export function resetSkillCache(server?: Server): void {
+    if (!server) {
+        skillRowCache.clear();
+        effectRowCache.clear();
+        return;
+    }
+    for (const key of [...skillRowCache.keys()]) {
+        if (key.startsWith(`${server}|`)) skillRowCache.delete(key);
+    }
+    for (const key of [...effectRowCache.keys()]) {
+        if (key.startsWith(`${server}|`)) effectRowCache.delete(key);
+    }
 }
 
-async function skillRowById(table: string): Promise<Map<number, Row>> {
-    let map = skillRowCache.get(table);
+async function skillRowById(server: Server, table: string): Promise<Map<number, Row>> {
+    const key = `${server}|${table}`;
+    let map = skillRowCache.get(key);
     if (!map) {
-        const rows = await masterdataClient.getTable<Row>(table).catch(() => []);
+        const rows = await clientFor(server).getTable<Row>(table).catch(() => []);
         map = new Map(rows.map(r => [num(r.id), r]));
-        skillRowCache.set(table, map);
+        skillRowCache.set(key, map);
     }
     return map;
 }
 
-async function effectRowsBySkill(table: string, field: string): Promise<Map<number, Row[]>> {
-    const key = `${table}.${field}`;
+async function effectRowsBySkill(server: Server, table: string, field: string): Promise<Map<number, Row[]>> {
+    const key = `${server}|${table}.${field}`;
     let map = effectRowCache.get(key);
     if (!map) {
-        const rows = await masterdataClient.getTable<Row>(table).catch(() => []);
+        const rows = await clientFor(server).getTable<Row>(table).catch(() => []);
         map = new Map<number, Row[]>();
         for (const r of rows) {
             const id = num(r[field]);
@@ -176,16 +187,17 @@ function renderTemplate(template: string, effects: Row[]): string {
 }
 
 /** 读取技能信息(名称 + 按最高等级套值的描述); 未找到返回 undefined */
-export async function getSkill(kind: SkillKind, skillId: number): Promise<SkillInfo | undefined> {
+export async function getSkill(server: Server, kind: SkillKind, skillId: number): Promise<SkillInfo | undefined> {
     if (!skillId || skillId <= 0) return undefined;
     const spec = SKILL_SPECS[kind];
-    const skill = (await skillRowById(spec.skillTable)).get(skillId);
+    const skill = (await skillRowById(server, spec.skillTable)).get(skillId);
     if (!skill) return undefined;
 
+    const { t } = regionFor(server);
     const name = await t(String(skill.nameTextID ?? ''));
     const template = await t(String(skill.descriptionTextFormatID ?? ''));
 
-    const effectRows = (await effectRowsBySkill(spec.effectTable, spec.effectSkillField)).get(skillId) ?? [];
+    const effectRows = (await effectRowsBySkill(server, spec.effectTable, spec.effectSkillField)).get(skillId) ?? [];
     const levels = [...new Set(effectRows.map(r => num(r.level)))].sort((a, b) => a - b);
     const maxLevel = levels.length ? levels[levels.length - 1] : 1;
     // 取最高等级那一组效果, 顺序即模板里 effects[i] 的下标
@@ -201,10 +213,10 @@ export async function getSkill(kind: SkillKind, skillId: number): Promise<SkillI
 }
 
 /** 批量读取(忽略缺失项; 第三项为展示标签) */
-export async function getSkills(entries: [SkillKind, number, string?][]): Promise<SkillInfo[]> {
+export async function getSkills(server: Server, entries: [SkillKind, number, string?][]): Promise<SkillInfo[]> {
     const out: SkillInfo[] = [];
     for (const [kind, id, label] of entries) {
-        const info = await getSkill(kind, id);
+        const info = await getSkill(server, kind, id);
         if (info) {
             info.label = label;
             out.push(info);
@@ -214,9 +226,9 @@ export async function getSkills(entries: [SkillKind, number, string?][]): Promis
 }
 
 /** 按等级组读取卡片等级上限(成员卡/支援卡各自的等级表) */
-export async function getMaxLevel(table: 'MasterMemberCardLevel' | 'MasterSupportCardLevel', group: number): Promise<number | undefined> {
+export async function getMaxLevel(server: Server, table: 'MasterMemberCardLevel' | 'MasterSupportCardLevel', group: number): Promise<number | undefined> {
     if (!group) return undefined;
-    const rows = await masterdataClient.getTable<Row>(table).catch(() => []);
+    const rows = await clientFor(server).getTable<Row>(table).catch(() => []);
     const levels = rows.filter(r => num(r.group) === group).map(r => num(r.level));
     return levels.length ? Math.max(...levels) : undefined;
 }

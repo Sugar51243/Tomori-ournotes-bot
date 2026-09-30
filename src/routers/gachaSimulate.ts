@@ -1,7 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { listToBase64 } from './utils';
-import { isServer } from '../types/Server';
+import { isServer, pickServer, Server, withServer } from '../types/Server';
 import { middleware } from './middleware';
 import { Gacha } from '../types/Gacha';
 import { simulateGacha, getCurrentGacha } from '../gacha/simulate';
@@ -21,7 +21,7 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { times = 10, compress, gachaId } = req.body;
         try {
-            const result = await commandGachaSimulate(gachaId, times, compress);
+            const result = await commandGachaSimulate(pickServer(req.body), gachaId, times, compress);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -30,20 +30,20 @@ router.post(
     }
 );
 
-export async function commandGachaSimulate(gachaId: number | undefined, times: number, compress: boolean): Promise<Array<Buffer | string>> {
+export async function commandGachaSimulate(server: Server, gachaId: number | undefined, times: number, compress: boolean): Promise<Array<Buffer | string>> {
     if (times > 10000) {
         return ['错误: 抽卡次数过多, 请不要超过10000次'];
     }
 
     let gacha: Gacha | undefined;
     if (gachaId !== undefined) {
-        gacha = new Gacha(gachaId);
+        gacha = withServer(new Gacha(gachaId), server);
         await gacha.init();
         if (!gacha.isExist) {
             return ['错误: 该卡池不存在'];
         }
     } else {
-        gacha = await getCurrentGacha();
+        gacha = await getCurrentGacha(server);
         if (!gacha) {
             return ['错误: 该服务器没有正在进行的卡池'];
         }
