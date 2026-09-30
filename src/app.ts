@@ -28,9 +28,13 @@ import { createAnnouncementStreamRouter } from './routers/announcementStream';
 import { playerRouter } from './routers/playerRoute';
 import { gatewayConfigured } from './data/player/client';
 import { disabledRouter } from './routers/disabled';
+import { renderCacheMiddleware } from './routers/renderCache';
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+
+// 渲染结果缓存: 只作用于确定性的出图/数据端点(见 renderCache.ts 的白名单)
+app.use(renderCacheMiddleware);
 
 app.get('/health', async (_req, res) => {
     try {

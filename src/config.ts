@@ -68,6 +68,10 @@ export const config = {
     songsPerPage: envInt('SONGS_PER_PAGE', 20),
     /** 贴纸列表分页: 每张图放多少张(5 列栅格, 默认 30 = 6 行) */
     stampsPerPage: envInt('STAMPS_PER_PAGE', 30),
+    /** 渲染结果缓存上限(MB): 出图开销主要在 PNG 编码, 相同查询直接回缓存 */
+    renderCacheBytes: envInt('RENDER_CACHE_MB', 128) * 1024 * 1024,
+    /** 已解码图片的缓存上限(MB): 避免每次出图都为上百张图走一遍磁盘缓存并重新解码 */
+    imageCacheBytes: envInt('IMAGE_CACHE_MB', 64) * 1024 * 1024,
     maxConcurrencyPerHost: envInt('MAX_CONCURRENCY_PER_HOST', 4),
     httpTimeoutMs: envInt('HTTP_TIMEOUT_MS', 20000),
     logLevel: envStr('LOG_LEVEL', 'info'),

@@ -88,7 +88,7 @@ npm run build && npm start
 
 启动后默认监听 `http://127.0.0.1:3000`，用 `GET /health` 检查（返回 master dataVersion 与运行时长）。缓存目录默认 `./cache`（已 gitignore）。
 
-**环境变量**（完整清单见 `.env.example`）：`PORT`、`META_BASE` / `ASSET_BASE` / `GAME_API_BASE` / `MOENOTES_SITE_BASE`（上游地址）、`MOENOTES_API_BASE` / `MOENOTES_API_KEY`（**可选的账号查询网关**，见第 5 节）、`CACHE_DIR`、`DEFAULT_SERVER`（缺省区域）、`DEFAULT_LOCALE` / `LOCALE_FALLBACKS`（文本语言回退链，各区域另有自己的默认语言）、各项 TTL（`MASTERDATA_TTL_S` / `VERSION_TTL_S` / `CHART_MANIFEST_TTL_S` / `CHART_ASSET_TTL_S` / `IMAGE_TTL_S` / `ANNOUNCEMENT_TTL_S` / `RANKING_TTL_S` / `PLAYER_TTL_S`）、`ANNOUNCEMENT_POLL_S` / `SSE_HEARTBEAT_S`（公告推送）、`SONGS_PER_PAGE` / `STAMPS_PER_PAGE`（歌表、贴纸列表分页）、`MAX_CONCURRENCY_PER_HOST` / `HTTP_TIMEOUT_MS`（上游限流与超时）、`LOG_LEVEL`、`GACHA_DEFAULT_RATES`（概率兜底）、数据库相关见第 6 节。
+**环境变量**（完整清单见 `.env.example`）：`PORT`、`META_BASE` / `ASSET_BASE` / `GAME_API_BASE` / `MOENOTES_SITE_BASE`（上游地址）、`MOENOTES_API_BASE` / `MOENOTES_API_KEY`（**可选的账号查询网关**，见第 5 节）、`CACHE_DIR`、`DEFAULT_SERVER`（缺省区域）、`DEFAULT_LOCALE` / `LOCALE_FALLBACKS`（文本语言回退链，各区域另有自己的默认语言）、各项 TTL（`MASTERDATA_TTL_S` / `VERSION_TTL_S` / `CHART_MANIFEST_TTL_S` / `CHART_ASSET_TTL_S` / `IMAGE_TTL_S` / `ANNOUNCEMENT_TTL_S` / `RANKING_TTL_S` / `PLAYER_TTL_S`）、`ANNOUNCEMENT_POLL_S` / `SSE_HEARTBEAT_S`（公告推送）、`SONGS_PER_PAGE` / `STAMPS_PER_PAGE`（歌表、贴纸列表分页）、`RENDER_CACHE_MB`（渲染结果缓存上限，默认 128MB）、`IMAGE_CACHE_MB`（已解码图片缓存上限，默认 64MB）、`MAX_CONCURRENCY_PER_HOST` / `HTTP_TIMEOUT_MS`（上游限流与超时）、`LOG_LEVEL`、`GACHA_DEFAULT_RATES`（概率兜底）、数据库相关见第 6 节。
 
 **自检**：`npm run typecheck`（类型检查）；启动后用 `GET /health` 与第 5 节的端点示例验证。
 
@@ -144,7 +144,7 @@ npm run build && npm start
 | `/searchSupportCard` | 同上（`cardType` 无效） | **查支援卡**（留影） |
 | `/searchCharacter` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | 角色搜索 / 详情 |
 | `/searchGacha` | `displayedServerList`, `gachaId`, `compress?` | 卡池详情 |
-| `/searchEvent` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | 活动搜索（当前游戏无活动数据，返回无结果） |
+| `/searchEvent` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | **活动查询**。渲染模式**按「该服自己有没有这个活动」决定，不做任何服务器硬编码**：<br>① 只请求一个服且**该服自己有**该活动 → **丰富详情图**（定宽 1000，自上而下分块，块间用整条底色标题带 + 分隔线区分）：<br>· **顶图**：活动底图 + 活动图标叠放（与网页同款）<br>· **基础信息**：左＝活动名称、种类、开放/结束时间、总时长、状态（未开始→距开始，进行中→距结束，已结束→已结束多久）、展示结束时间；右＝活动道具（图标 + 名称 + ID）<br>· **加成对象**：成员卡 ── 分界线 ── 支援卡，各带 ID、缩图与按觉醒等级的加成区间；条件加成用小表格（条件/适用/加成）<br>· **点数奖励**：每格 = pt + 奖励图标 + 数量，**每行 4 格**；只列含星钻 / 幸运水晶 / 奇迹水晶 / 棱晶 / 角色卡 / 支援卡的档位（全量 78 档大半是金币与经验，全画会非常长）<br>· **总奖励**：**全部**奖励的合计（含上面被筛掉的金币、经验、技能券、活动徽章等），图标 + 数量按实际宽度流式排列，放不下换行<br>· **演出报酬 / 挑战演出报酬**：分开两张表，每行 = 得分评级 + 分数门槛 + 活动点数 + 道具<br><br>· 说明：活动歌曲与活动卡牌**暂未**画进这张图（版式按最新要求重排后未列入，且图已经偏长）；两者在模型里都有解析，需要时可直接加回；<br>② 其余情况（多服请求，或请求的那个服自己没有）→ **多服组合表**（每服一行、行首国旗）。<br>上游活动数据由各服独立上传，「某服暂时没有」不等于活动不存在 —— 这时用组合表 + **未收录占位**呈现，顺带看出哪个服有；只有**四个服都没有**才返回「该活动不存在」。 |
 | `/gachaSimulate` | `mainServer`, `times?`(默认 10，上限 10000), `gachaId?`, `compress?` | 抽卡模拟：真实概率（MasterGachaLot 权重 → MasterGachaPrize 资源，含 UP 权重），不传 `gachaId` 取当前开放卡池，10 连保底；≤10 次逐个展示，>10 次计数汇总 |
 | `/getCardIllustration` | `displayedServerList?`, `cardId`, `cardType?` | 卡面原图（角色卡 1440×1920 竖版 / 支援卡 1920×1080 横版）。原图直出无法表达多服差异，取**第一个收录该卡的区域** |
 | `/songRandom` | `mainServer`, `text?` \| `fuzzySearchResult?`, `compress?` | 随机歌曲详情图 |
@@ -160,6 +160,60 @@ npm run build && npm start
 | `/announcements` | `server` \| `mainServer`, `id?`, `compress?` | **公告一次性查询（单服出图）**：不传 `id` 出**列表图**（分类徽章 + 标题 + 起止时间 + 横幅缩略图，港澳台/韩/国际有横幅、**日服上游没有横幅字段故退化为纯文字行**）；传 `id` 出**该条公告的详情图**（标题/分类/时间/横幅 + 正文，正文由上游的 HTML 去标签后按纯文本排版，过长自动分页） |
 | `/announcementStream/{tw\|jp\|kr\|en}` | GET | **公告推送（SSE，每服四条独立端点）**：**只在公告新增或修改时**推 `announcement`（含该条公告的详情图 base64），连接时不发快照、下架也不推 —— 需要全量列表请用上面的一次性接口。另有 `ready` 握手与 `: ping` 保活。仅在有订阅者时轮询上游 |
 | `/cutoffAll` `/cutoffDetail` `/cutoffListOfRecentEvent` `/user` | — | **404 占位**：`错误: 服务器未启用数据库`（与 tsugu 无 DB 时一致）。`/user` 在 tsugu 是账号绑定 API，本服务不实现 |
+
+### 渲染性能
+
+出图的耗时几乎全在**画布绘制 + PNG 编码**上 —— 实测 `songChart` 冷渲染 2.3s 里约 1.4s 是 PNG 编码，`songMeta` 1.2s 里约 0.75s。而 `@napi-rs/canvas` 这一版**没有开放 PNG 压缩级别**可调，所以走缓存：
+
+**渲染结果缓存**（`src/routers/renderCache.ts`，进程内 LRU，上限 `RENDER_CACHE_MB`）按「端点 + 请求体 + 相关区域的 dataVersion」缓存**已序列化的响应 JSON**，命中时直接回字符串，连 `JSON.stringify` 都省掉。
+
+| | 冷渲染 | 缓存命中 |
+| --- | --- | --- |
+| `songChart` | ~2265 ms | **~70 ms** |
+| `songMeta` | ~1240 ms | **~62 ms** |
+| `getStampImage`（列全部） | ~800 ms | **~58 ms** |
+| `searchEvent`（丰富版） | ~400 ms | **~80 ms** |
+| `searchSong` / `searchCard` / `searchCharacter`（单服） | 160~250 ms | **~55~65 ms** |
+| 同上但**多服对比** | 160~350 ms | 不缓存，仍 ~130~350 ms |
+
+- **只覆盖确定性端点**：随机类（`/songRandom`、`/gachaSimulate`）与用户数据类（`/searchPlayer`、`/songRanking`、`/announcements`、交友/车站）一律不进缓存
+- **多服对比图不进响应缓存**：只要这次请求会画出多个服务器（显式给多个 `displayedServerList`，或省略字段按默认四服），就每次重画 —— 免得某个服的状态变化（素材镜像跟上、数据补录）在缓存过期前一直显示旧图。单服请求仍走缓存
+- **`/searchEvent` 刻意不进响应缓存** —— 活动图里有「距开始 / 距结束」倒计时，必须每次重画；它靠下面那层图片缓存提速：稳态 **~140 ms**（首次 1~2 s，因为要一次性探明哪些区域缺素材）
+- **失效**：键里带各区域的 `dataVersion`，上游数据更新后自动不再命中
+- **进程重启后的第一个请求**不缓存（此时版本清单还没加载，拿不到失效依据），从第二个请求起生效
+- 缓存的是响应体，不是画布；信息量与不开缓存时完全一致
+
+**已解码图片缓存**（`src/data/imageCache.ts`，上限 `IMAGE_CACHE_MB`）：一次活动出图要取上百张图（横幅、图标、卡面、每个奖励条目的道具图标），其中大量重复（同一个道具图标出现在多个里程碑里），而 `imageBuffer` 每次都走磁盘缓存（stat + 读文件 + 读 etag 三次文件系统操作）再解码。实测 `Event.init()` 只有 0~1 ms、单张解码 0.5~19 ms —— 贵的是这上百次磁盘往返。这一层按 `assetCacheKey` 缓存解码结果，命中时只剩一次 Map 查找。
+
+**素材 404 不再是致命错误**：`imageBuffer` 现在任何失败都返回 `undefined`（调用方本来就都在判空），单张图缺失只影响那一块，不会把整次出图打成 500；活动视图还会按区域逐个尝试（上游各区域镜像进度不一），并记住哪个区域能取到，避免每次渲染都重试一遍 404。
+
+### 活动查询
+
+**渲染模式按「该服自己有没有这个活动」决定，没有任何服务器硬编码**（上游活动数据各服独立上传，将来别的服有活动时会自动走丰富版）：
+
+| 情况 | 输出 |
+| --- | --- |
+| 只请求一个服，且该服自己有该活动 | 丰富详情图 |
+| 只请求一个服，但该服没有 | 多服组合表（放宽到四个服，缺的显示「未收录」占位） |
+| 请求多个服 | 多服组合表（覆盖请求的那些服） |
+| 四个服都没有该 ID | `错误: 该活动不存在` |
+
+「某服暂时没有」不等于活动不存在，所以第 2 行走占位而不是报错。
+
+**模糊搜索维度**（复用既有模糊索引，不另建匹配逻辑）：
+
+| 维度 | 关键词示例 | 走哪条路 |
+| --- | --- | --- |
+| 活动名称 | `アイの奔流` | 索引类型键 `eventId` 的名称别名 |
+| 乐队 | `夢限大` | 索引类型键 `bandId`；部分名走 `_all` 子串回退 |
+| 角色 | `千石` | 索引类型键 `characterId`；部分名走 `_all` 子串回退 |
+| 属性 | `紺碧` | 索引类型键 `cardType`（本服务为活动新增，覆盖五种属性的多语言名与去后缀名） |
+| 时间 | `进行中` / `未开始` / `已结束` / `即将结束` | **状态关键词**，由搜索层直接筛活动状态 |
+| 时间 | `2026-09-30` | 日期串与活动的开放/结束时间做子串匹配（`-` 与 `/` 等价） |
+
+**数据现状**：`MasterEvent` 目前**只有日服有数据**（1 条），tw/kr/en 都是空表 —— 对这三个服单独查活动会返回「该活动不存在」，多服查询里它们显示「未收录」。
+
+**活动种类**：主数据里**没有种类名称表**，只有一个 `eventType` 数字，站点也不显示种类。本服务暂时用活动自身的排名开关拼出种类标签（实测该活动 = `乐曲排名 · 乐曲总排名`），见 `Event.typeLabel()`。
 
 ### 贴纸检索的匹配维度
 

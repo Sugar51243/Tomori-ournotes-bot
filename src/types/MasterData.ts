@@ -21,6 +21,8 @@ export interface LiveMusicRow {
     hardID: number;
     expertID: number;
     jacketAssetName: string;
+    /** 评分等级组(对应 MasterLiveScoreRank.group), 活动奖励的分数门槛靠它查 */
+    liveScoreRankGroup: number;
     lyricistTextID: string;
     composerTextID: string;
     arrangerTextID: string;
@@ -206,6 +208,144 @@ export interface PenLightColorRow {
 
 export interface EventRow {
     id: number;
+    nameTextId: string;
+    startAt: string;
+    endAt: string;
+    /** 展示用结束时间(比 endAt 晚, 用于结算展示) */
+    displayEndAt: string;
+    /** 活动种类; 实测只有 jp 有数据且当前仅观测到 1 */
+    eventType: number;
+    /** 活动道具 -> MasterItem */
+    eventItemId: number;
+    /** 演出报酬组 -> MasterLiveEventReward.eventGroup */
+    liveEventRewardGroup: number;
+    /** 点数奖励组 -> MasterLiveEventPoint.group */
+    liveEventPointGroup: number;
+    challengeLiveEventRewardGroup: number;
+    challengeLiveEventPointGroup: number;
+    /** 活动曲 -> MasterLiveMusic */
+    musicId: number;
+    logoAsset: string;
+    backgroundAsset: string;
+    bannerAsset: string;
+    /** 排名开关; 用来描述这个活动「有哪些排名」(主数据里没有种类名称表) */
+    isRankingDisabled: boolean;
+    isMusicRankingDisabled: boolean;
+    isTotalMusicRankingDisabled: boolean;
+    [key: string]: unknown;
+}
+
+/** 活动加成(MasterEventEffect): 具体卡片行带 memberCardId/supportCardId, 条件行带 bandId/cardType 等 */
+export interface EventEffectRow {
+    id: number;
+    eventId: number;
+    /** 2=成员卡 3=支援卡 */
+    resourceTypeConstraint: number;
+    characterId: number;
+    bandId: number;
+    /** 卡片属性(1 红 2 蓝 3 绿 4 黄 5 紫) */
+    cardType: number;
+    tagId: number;
+    memberCardId: number;
+    supportCardId: number;
+    eventBonusType: number;
+    rank1EffectValue: number;
+    rank2EffectValue: number;
+    rank3EffectValue: number;
+    rank4EffectValue: number;
+    rank5EffectValue: number;
+    [key: string]: unknown;
+}
+
+/** 活动卡牌(MasterEventPickUpCard) */
+export interface EventPickupCardRow {
+    id: number;
+    eventId: number;
+    /** 2=成员卡 3=支援卡 */
+    resourceType: number;
+    resourceId: number;
+    [key: string]: unknown;
+}
+
+/** 活动歌曲(MasterChallengeMusic) */
+export interface ChallengeMusicRow {
+    id: number;
+    eventId: number;
+    liveMusicId: number;
+    musicType: number;
+    [key: string]: unknown;
+}
+
+/** 点数奖励(MasterLiveEventPoint) */
+export interface LiveEventPointRow {
+    id: number;
+    group: number;
+    /** 评分等级(对应 MasterLiveScoreRank.liveScoreRank) */
+    scoreRank: number;
+    value: number;
+    [key: string]: unknown;
+}
+
+/** 演出报酬(MasterLiveEventReward) */
+export interface LiveEventRewardRow {
+    id: number;
+    eventGroup: number;
+    group: number;
+    scoreRank: number;
+    /** 1=道具 等 */
+    resourceType: number;
+    resourceId: number;
+    resourceCount: number;
+    probability: number;
+    [key: string]: unknown;
+}
+
+/** 评分等级门槛(MasterLiveScoreRank) */
+export interface LiveScoreRankRow {
+    id: number;
+    group: number;
+    liveScoreRank: number;
+    requiredScore: number;
+    [key: string]: unknown;
+}
+
+/** 累计点数奖励(MasterEventAchievementReward): 达到 eventPoint 给 rewardIds */
+export interface EventAchievementRewardRow {
+    id: number;
+    eventId: number;
+    eventPoint: number;
+    rewardIds: number[];
+    [key: string]: unknown;
+}
+
+/** 挑战演出点数(MasterChallengeLiveEventPoint) */
+export interface ChallengeLiveEventPointRow {
+    id: number;
+    group: number;
+    scoreRank: number;
+    value: number;
+    [key: string]: unknown;
+}
+
+/** 挑战演出报酬(MasterChallengeLiveEventReward) */
+export interface ChallengeLiveEventRewardRow {
+    id: number;
+    eventGroup: number;
+    group: number;
+    scoreRank: number;
+    resourceType: number;
+    resourceId: number;
+    resourceCount: number;
+    probability: number;
+    [key: string]: unknown;
+}
+
+/** 奖励条目(MasterReward) */
+export interface RewardRow {
+    id: number;
+    resourceType: number;
+    resourceId: number;
+    resourceCount: number;
     [key: string]: unknown;
 }
 

@@ -4,6 +4,7 @@ import { logger } from './logger';
 import { setFuzzyConfig, resetFuzzyConfig, FuzzySearchConfig } from './fuzzySearch';
 import { diskCache } from './data/cache';
 import { Server } from './types/Server';
+import { cardTypeTextIds } from './types/Card';
 
 /**
  * 索引结构版本: 别名类型键(如新增 supportCardId)或别名规则变化时 +1, 使旧缓存自动失效。
@@ -13,8 +14,9 @@ import { Server } from './types/Server';
  * v4: 新增乐团分类(bandId); 歌曲不再并入乐团别名, 改由乐团分类查询
  * v5: 索引按游戏区域分片(缓存键与内存配置都带 server)
  * v6: 新增贴纸名(stampId); 角色/团体维度复用既有的 characterId / bandId
+ * v7: 新增卡片属性(cardType), 供活动按「加成属性」检索
  */
-const FUZZY_INDEX_VERSION = 6;
+const FUZZY_INDEX_VERSION = 7;
 
 /**
  * 别名索引构建: 由本区域 masterdata 生成模糊搜索配置。
@@ -115,6 +117,15 @@ async function buildConfig(server: Server): Promise<FuzzySearchConfig> {
     // 卡池
     for (const gacha of gachas) {
         add('gachaId', gacha.id, aliasVariants(await localeVariants(gacha.nameTextId)));
+    }
+    // 卡片属性(绯红/绀碧/翡翠/琉金/紫苑) -> 类型键 cardType; 主要供活动按「加成属性」检索
+    for (const [value, textId] of Object.entries(cardTypeTextIds)) {
+        const names = await localeVariants(textId);
+        add('cardType', value, aliasVariants([
+            ...names,
+            // 官方文案形如「绯红属性 / 紅赤タイプ」, 去掉后缀让「绯红」也能命中
+            ...names.map(n => n.replace(/\s*(属性|屬性|タイプ|타입|types?|type)$/i, '').trim())
+        ]));
     }
     // 贴纸(名称多语言) -> 类型键 stampId; 角色名/团体名的命中走 characterId / bandId 两个既有类型
     for (const stamp of await store.stampList()) {

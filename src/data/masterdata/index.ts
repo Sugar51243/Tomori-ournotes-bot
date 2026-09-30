@@ -5,7 +5,11 @@ import { Server } from '../../types/Server';
 import {
     LiveMusicRow, LiveMusicScoreRow, BandRow, CharacterRow,
     MemberCardRow, GachaRow, EventRow, GachaLotRow, GachaPrizeRow,
-    SupportCardRow, ItemRow, MusicCategoryRow, PenLightColorRow, StampRow
+    SupportCardRow, ItemRow, MusicCategoryRow, PenLightColorRow, StampRow,
+    EventEffectRow, EventPickupCardRow, ChallengeMusicRow,
+    LiveEventPointRow, LiveEventRewardRow, LiveScoreRankRow,
+    EventAchievementRewardRow, RewardRow, ChallengeLiveEventPointRow,
+    ChallengeLiveEventRewardRow
 } from '../../types/MasterData';
 import { logger } from '../../logger';
 
@@ -176,6 +180,69 @@ export class MasterDataStore {
             if (name && name !== row.textKey) names.push(name);
         }
         return names;
+    }
+
+    // ---- 活动相关(MasterEvent 只有 jp 有数据, 其余区域为空表) ----
+
+    async eventEffectsByEvent(eventId: number): Promise<EventEffectRow[]> {
+        const rows = await clientFor(this.server).getTable<EventEffectRow>('MasterEventEffect').catch(() => []);
+        return rows.filter(r => Number(r.eventId) === eventId);
+    }
+
+    async eventPickupCardsByEvent(eventId: number): Promise<EventPickupCardRow[]> {
+        const rows = await clientFor(this.server).getTable<EventPickupCardRow>('MasterEventPickupCard').catch(() => []);
+        return rows.filter(r => Number(r.eventId) === eventId);
+    }
+
+    async challengeMusicByEvent(eventId: number): Promise<ChallengeMusicRow[]> {
+        const rows = await clientFor(this.server).getTable<ChallengeMusicRow>('MasterChallengeMusic').catch(() => []);
+        return rows.filter(r => Number(r.eventId) === eventId);
+    }
+
+    async liveEventPointsByGroup(group: number): Promise<LiveEventPointRow[]> {
+        if (!group) return [];
+        const rows = await clientFor(this.server).getTable<LiveEventPointRow>('MasterLiveEventPoint').catch(() => []);
+        return rows.filter(r => Number(r.group) === group);
+    }
+
+    async liveEventRewardsByGroup(eventGroup: number): Promise<LiveEventRewardRow[]> {
+        if (!eventGroup) return [];
+        const rows = await clientFor(this.server).getTable<LiveEventRewardRow>('MasterLiveEventReward').catch(() => []);
+        return rows.filter(r => Number(r.eventGroup) === eventGroup);
+    }
+
+    async liveScoreRanksByGroup(group: number): Promise<LiveScoreRankRow[]> {
+        if (!group) return [];
+        const rows = await clientFor(this.server).getTable<LiveScoreRankRow>('MasterLiveScoreRank').catch(() => []);
+        return rows.filter(r => Number(r.group) === group);
+    }
+
+    /** 累计点数奖励(里程碑): 达到指定活动点数给 rewardIds 里的东西 */
+    async achievementRewardsByEvent(eventId: number): Promise<EventAchievementRewardRow[]> {
+        const rows = await clientFor(this.server).getTable<EventAchievementRewardRow>('MasterEventAchievementReward').catch(() => []);
+        return rows.filter(r => Number(r.eventId) === eventId).sort((a, b) => a.eventPoint - b.eventPoint);
+    }
+
+    /** 奖励条目(MasterReward): 按 id 批量取 */
+    async rewardsByIds(ids: number[]): Promise<Map<number, RewardRow>> {
+        if (!ids.length) return new Map();
+        const rows = await clientFor(this.server).getTable<RewardRow>('MasterReward').catch(() => []);
+        const want = new Set(ids);
+        return new Map(rows.filter(r => want.has(r.id)).map(r => [r.id, r]));
+    }
+
+    /** 挑战演出点数(MasterChallengeLiveEventPoint) */
+    async challengeLiveEventPointsByGroup(group: number): Promise<ChallengeLiveEventPointRow[]> {
+        if (!group) return [];
+        const rows = await clientFor(this.server).getTable<ChallengeLiveEventPointRow>('MasterChallengeLiveEventPoint').catch(() => []);
+        return rows.filter(r => Number(r.group) === group);
+    }
+
+    /** 挑战演出报酬(MasterChallengeLiveEventReward) */
+    async challengeLiveEventRewardsByGroup(eventGroup: number): Promise<ChallengeLiveEventRewardRow[]> {
+        if (!eventGroup) return [];
+        const rows = await clientFor(this.server).getTable<ChallengeLiveEventRewardRow>('MasterChallengeLiveEventReward').catch(() => []);
+        return rows.filter(r => Number(r.eventGroup) === eventGroup);
     }
 
     /** 应援色(主色 + 副色, 十六进制) */

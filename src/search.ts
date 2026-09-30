@@ -110,20 +110,81 @@ export async function searchGachas(server: Server, matches: FuzzySearchResult): 
     return gachas;
 }
 
-/** 按模糊搜索结果过滤活动 */
+/**
+ * 活动的「时间」搜索维度: 状态关键词。
+ * 关键词落到 matches._all 里时, 先看是不是状态词, 是就从匹配里摘出来改成状态过滤,
+ * 剩下的词才交给 match() 做名称/角色/乐队/属性匹配。
+ */
+const STATUS_KEYWORDS: Array<{ words: string[]; test: (e: Event, now: Date) => boolean }> = [
+    { words: ['进行中', '开启中', '开放中', 'ongoing'], test: (e, now) => e.status(now) === 'open' },
+    { words: ['即将结束', '快结束', '将要结束'], test: (e, now) => e.status(now) === 'open' && !!e.endAt && e.endAt.getTime() - now.getTime() < 24 * 3600 * 1000 },
+    { words: ['未开始', '未开', '即将开始', '尚未开始'], test: (e, now) => e.status(now) === 'upcoming' },
+    { words: ['已结束', '结束', '已关闭'], test: (e, now) => e.status(now) === 'ended' }
+];
+
+/** 从关键词里摘出状态词与日期串; 返回剩余关键词(交给 match)与筛选条件 */
+function splitEventKeywords(matches: FuzzySearchResult): {
+    rest: FuzzySearchResult;
+    statuses: Array<(e: Event, now: Date) => boolean>;
+    dates: string[];
+} {
+    const statuses: Array<(e: Event, now: Date) => boolean> = [];
+    const dates: string[] = [];
+    const words = ((matches['_all'] ?? []) as Array<string | number>).map(String);
+    const kept: string[] = [];
+    for (const word of words) {
+        const hit = STATUS_KEYWORDS.find(s => s.words.some(w => word.includes(w)));
+        if (hit) {
+            statuses.push(hit.test);
+            continue;
+        }
+        // 日期串形如 2026/09/30 或 2026-09-30
+        if (/^\d{4}[\/\-]\d{1,2}([\/\-]\d{1,2})?$/.test(word)) {
+            dates.push(word.replace(/-/g, '/'));
+            continue;
+        }
+        kept.push(word);
+    }
+    const rest: FuzzySearchResult = { ...matches };
+    if (kept.length) rest['_all'] = kept;
+    else delete rest['_all'];
+    return { rest, statuses, dates };
+}
+
+/** 按模糊搜索结果过滤活动(名称/角色/乐队/属性 + 时间维度) */
 export async function searchEvents(server: Server, matches: FuzzySearchResult): Promise<Event[]> {
     await refreshRegion(server);
     await ensureFuzzyIndex(server);
+    const { rest, statuses, dates } = splitEventKeywords(matches);
+    const now = new Date();
+
+    // 关键词里除了状态/日期没有别的 -> 不做名称匹配, 直接按状态/日期筛
+    const onlyTimeFilters = Object.keys(rest).length === 0;
+
     const rows = await storeFor(server).eventList();
     const events: Event[] = [];
     for (const row of rows) {
         const e = withServer(new Event(row.id), server);
         await e.init();
-        if (match(matches, e.fuzzyTarget(), [])) {
-            events.push(e);
+        if (!onlyTimeFilters && !match(rest, e.fuzzyTarget(), [])) continue;
+        if (!statuses.every(t => t(e, now))) continue;
+        if (dates.length) {
+            // 日期串与开放/结束时间做子串匹配(已把 - 统一成 /)
+            const range = `${formatRange(e)}`;
+            if (!dates.some(d => range.includes(d))) continue;
         }
+        events.push(e);
     }
     return events;
+}
+
+/** 活动的起止时间文本(与图片上显示的口径一致), 供日期搜索使用 */
+function formatRange(e: Event): string {
+    const fmt = (d?: Date) => {
+        if (!d) return '';
+        return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    };
+    return `${fmt(e.startAt)} ${fmt(e.endAt)}`;
 }
 
 /** text -> 模糊搜索结果(按区域分片的索引) */

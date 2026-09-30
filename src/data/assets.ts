@@ -86,6 +86,21 @@ export function gachaBannerUrl(server: Server, bannerAssetName: string, locale?:
     return assetUrl(server, `${bannerAssetName}/${bannerAssetName.split('/').at(-1)}.webp`, locale);
 }
 
+/**
+ * 活动图标: asset 形如 "01/Logo/event_logo_01_0001"
+ * 规则实测: {assetBase}/{region}/{locale}/Image/Event/{asset}/{末段}.webp
+ */
+export function eventLogoUrl(server: Server, logoAsset: string, locale?: string): string {
+    const name = logoAsset.split('/').at(-1) ?? logoAsset;
+    return assetUrl(server, `Image/Event/${logoAsset}/${name}.webp`, locale);
+}
+
+/** 活动顶图: asset 形如 "01/Top/event_top_01_0001" */
+export function eventBackgroundUrl(server: Server, backgroundAsset: string, locale?: string): string {
+    const name = backgroundAsset.split('/').at(-1) ?? backgroundAsset;
+    return assetUrl(server, `Image/Event/${backgroundAsset}/${name}.webp`, locale);
+}
+
 /** 背景图: 名称形如 bg_adv_0103 / OfflineBonusBackground */
 export function backgroundUrl(server: Server, name: string, locale?: string): string {
     return assetUrl(server, `Image/Background/${name}/${name}.webp`, locale);
@@ -109,8 +124,14 @@ export function chartAssetUrl(sha: string, ext: string): string {
     return `${config.assetBase}/chart-site/assets/${sha}.${ext}`;
 }
 
-/** 加载图片 Buffer(cachedFetch 包装, 允许陈旧回退) */
+/**
+ * 加载图片 Buffer(cachedFetch 包装, 允许陈旧回退)。
+ *
+ * **任何失败都返回 undefined, 绝不抛异常** —— 上游素材缺失(新出的卡面/封面在部分区域的镜像
+ * 还没跟上时会 404)或网络故障时, 调用方一律按「没图」处理(画占位块或跳过),
+ * 不能让单张图把整次出图打成 500。所有调用点本来就都在判 undefined。
+ */
 export async function imageBuffer(url: string, cacheKey: string): Promise<Buffer | undefined> {
-    const res = await cachedFetch(url, { key: cacheKey, ttlS: config.imageTtlS, allowStale: true });
+    const res = await cachedFetch(url, { key: cacheKey, ttlS: config.imageTtlS, allowStale: true }).catch(() => undefined);
     return res?.data;
 }
