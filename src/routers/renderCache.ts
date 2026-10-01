@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { logger } from '../logger';
 import { cachedVersionManifest } from '../data/masterdata/client';
+import { currentRenderEpoch } from '../renderEpoch';
 import { SERVER_LIST, pickServers, serverProfile } from '../types/Server';
 
 /**
@@ -13,7 +14,7 @@ import { SERVER_LIST, pickServers, serverProfile } from '../types/Server';
  * 命中时直接回字符串, 连 JSON.stringify 都省掉。
  *
  * 只覆盖**确定性**接口 —— 随机类(`/songRandom`、`/gachaSimulate`)与
- * 用户数据类(`/searchPlayer`、`/songRanking`、`/announcements`、交友/车站)一律不进缓存。
+ * 用户数据/活动类(`/searchPlayer`、`/songRanking`、`/eventRanking`、`/eventRecommend`、`/announcements`、交友/车站)一律不进缓存。
  */
 
 /** 允许缓存的端点(其余一律直通) */
@@ -92,7 +93,7 @@ export function renderCacheMiddleware(req: Request, res: Response, next: NextFun
         next();
         return;
     }
-    const key = `${req.path}|${versions}|${stableStringify(req.body)}`;
+    const key = `${req.path}|${versions}|e${currentRenderEpoch()}|${stableStringify(req.body)}`;
 
     const hit = entries.get(key);
     if (hit) {

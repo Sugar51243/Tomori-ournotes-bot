@@ -3,6 +3,7 @@ import { config } from '../config';
 import { logger } from '../logger';
 import type { FriendDoc } from '../types/Friend';
 import type { StationDoc } from '../types/Station';
+import type { KeywordDoc } from '../types/Keyword';
 
 /**
  * 社区功能(交友/车站)的 MongoDB 接入: 惰性单例 + 首次取集合时自建索引。
@@ -53,6 +54,21 @@ function ensureIndexes(name: string, indexes: IndexDescription[]): Promise<void>
         indexReady.set(name, ready);
     }
     return ready;
+}
+
+/**
+ * 用户关键词集合。
+ * 唯一索引落在 (实体, 归一化关键词) 上: 同一实体的重复上传由数据库兜底
+ * (并发上传时也只会成功一条), 换个实体挂同一个词是合法的。
+ * 该索引的前缀同时覆盖「按实体取关键词」的查询, 不需要再加单列索引。
+ */
+export async function keywordsCollection(): Promise<Collection<KeywordDoc> | undefined> {
+    const db = await getDb();
+    if (!db) return undefined;
+    await ensureIndexes('keywords', [
+        { key: { entityType: 1, entityId: 1, normKeyword: 1 }, name: 'entity_norm_unique', unique: true }
+    ]);
+    return db.collection<KeywordDoc>('keywords');
 }
 
 /** 交友集合: userId(QQ 号) 唯一 */

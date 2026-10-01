@@ -10,6 +10,8 @@ export interface RankingEntry {
     playerName: string;
     /** 最高分卡组的队长卡 id(可能缺省) */
     cardId?: string;
+    /** 最高分卡组综合力(上游 highScoreDeck.totalPower; 上游缺省时为 undefined) */
+    deckPower?: number;
 }
 
 export interface MusicRanking {
@@ -24,3 +26,6 @@ export interface MusicRanking {
 export function formatScore(score: number): string {
     return score.toLocaleString('en-US');
 }
+
+/** 前三名奖牌色(歌曲排行 / 活动榜线共用) */
+export const RANK_COLORS = ['#ffd76e', '#cfd8e3', '#e0a06a'];

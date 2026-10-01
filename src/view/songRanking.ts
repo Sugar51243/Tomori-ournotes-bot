@@ -1,6 +1,6 @@
 import { createCanvas } from '@napi-rs/canvas';
 import { Server, serverProfile } from '../types/Server';
-import { MusicRanking, formatScore } from '../types/Ranking';
+import { MusicRanking, formatScore, RANK_COLORS } from '../types/Ranking';
 import { drawTitle, drawMetaBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H } from '../components/list';
 import { drawBackground } from '../components/background';
 import { drawServerIcon } from '../components/serverIcon';
@@ -17,9 +17,6 @@ const MARGIN = 16;
 /** 页头 = 主标题带 + 副信息带(国旗/服名/曲目) */
 const HEADER_H = TITLE_BAND_H + META_BAND_H;
 const ROW_H = 34;
-
-/** 前三名用奖牌色, 其余灰白 */
-const RANK_COLORS = ['#ffd76e', '#cfd8e3', '#e0a06a'];
 
 export async function drawSongRanking(server: Server, musicId: number, title: string, ranking: MusicRanking, compress: boolean): Promise<Array<Buffer | string>> {
     const profile = serverProfile(server);

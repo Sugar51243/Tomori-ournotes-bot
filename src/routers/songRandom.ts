@@ -28,7 +28,7 @@ router.post(
             if (fuzzySearchResult) {
                 candidates = await searchSongs(server, fuzzySearchResult);
             } else if (text) {
-                candidates = await searchSongs(server, textToFuzzyResult(server, text));
+                candidates = await searchSongs(server, await textToFuzzyResult(server, text));
             } else {
                 candidates = await searchSongs(server, {});
             }

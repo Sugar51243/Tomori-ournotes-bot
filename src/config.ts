@@ -60,12 +60,13 @@ export const config = {
     announcementPollS: envInt('ANNOUNCEMENT_POLL_S', 300),
     /** 歌曲排行缓存 */
     rankingTtlS: envInt('RANKING_TTL_S', 300),
+    /** 谱面效率数据(music-data.json, 站点「歌曲meta」同源); 随游戏版本更新 */
+    musicDataUrl: envStr('MUSIC_DATA_URL', 'https://storage.bdon.moe/moenotes/music-data/music-data.json').replace(/\/+$/, ''),
+    musicDataTtlS: envInt('MUSIC_DATA_TTL_S', 86400),
     /** 玩家档案缓存 */
     playerTtlS: envInt('PLAYER_TTL_S', 300),
     /** SSE 心跳间隔(注释行保活) */
     sseHeartbeatS: envInt('SSE_HEARTBEAT_S', 25),
-    /** 歌表分页: 每张图放多少首歌(每首歌占 1 个区块头 + N 个服务器行) */
-    songsPerPage: envInt('SONGS_PER_PAGE', 20),
     /** 贴纸列表分页: 每张图放多少张(5 列栅格, 默认 30 = 6 行) */
     stampsPerPage: envInt('STAMPS_PER_PAGE', 30),
     /** 渲染结果缓存上限(MB): 出图开销主要在 PNG 编码, 相同查询直接回缓存 */
@@ -82,6 +83,11 @@ export const config = {
     dbConnectTimeoutMs: envInt('DB_CONNECT_TIMEOUT_MS', 3000),
     /** 车站房间有效期(秒): 默认同 tsugu 的 150 秒 */
     stationTtlS: envInt('STATION_TTL_S', 150),
+    /**
+     * 用户关键词的内存快照存活时间(秒)。关键词存在 MongoDB 里, 搜索与出图都要用,
+     * 每次请求都查库不划算; 上传/删除会主动强制刷新, 这里的 TTL 只兜底多进程/多实例场景。
+     */
+    keywordCacheTtlS: envInt('KEYWORD_CACHE_TTL_S', 60),
     gachaDefaultRates: envJson<Record<string, number>>('GACHA_DEFAULT_RATES', { '2': 88.5, '3': 8.5, '4': 3.0 }),
     userAgent: `tomori/0.1 (Node ${process.version})`
 };

@@ -41,6 +41,21 @@ export interface EventSong {
     musicId: number;
     title: string;
     jacketAssetName: string;
+    /** 是否为本次活动的**新曲**(即 MasterEvent.musicId); 挑战曲复用的老歌为 false */
+    isNew: boolean;
+}
+
+/**
+ * 活动种类名(出图时标在相关曲目右侧)。
+ * 实测上游目前只观测到 1 = 挑战演出; 别的种类还没出现过, 所以只列已知的,
+ * 未知种类不标 —— 宁可少标也不要标错。
+ */
+export const EVENT_TYPE_LABELS: Record<number, string> = {
+    1: '挑战live'
+};
+
+export function eventTypeLabel(eventType: number): string {
+    return EVENT_TYPE_LABELS[eventType] ?? '';
 }
 
 /** 奖励条目(道具 / 角色卡 / 支援卡) */
@@ -163,15 +178,27 @@ export class Event {
     }
 
     /**
-     * 活动歌曲: **只列本次活动的新曲**(即 MasterEvent.musicId)。
-     * MasterChallengeMusic 里的另几首是挑战曲, 复用的是已有的老歌, 不算活动新曲, 故不列。
+     * 相关曲目: 活动新曲(MasterEvent.musicId)**在前**, 后面接挑战曲列表(MasterChallengeMusic,
+     * 大多是复用的老歌)。两者按 musicId 去重, 老歌排重后仍保留在上游给的挑战曲顺序上。
+     * 新曲由 isNew 标出, 出图时在封面上叠「活动新曲」角标。
      */
     private async loadSongs(store: Store, t: TextFn): Promise<void> {
-        const musicId = this.row?.musicId;
-        if (!musicId) return;
-        const music = await store.songById(musicId);
-        if (!music) return;
-        this.songs.push({ musicId, title: await t(music.titleTextID), jacketAssetName: music.jacketAssetName });
+        const seen = new Set<number>();
+        const add = async (musicId: number, isNew: boolean): Promise<void> => {
+            if (!musicId || seen.has(musicId)) return;
+            const music = await store.songById(musicId);
+            if (!music) return;
+            seen.add(musicId);
+            this.songs.push({ musicId, title: await t(music.titleTextID), jacketAssetName: music.jacketAssetName, isNew });
+        };
+
+        const newMusicId = Number(this.row?.musicId ?? 0);
+        if (newMusicId) await add(newMusicId, true);
+
+        const challenges = await store.challengeMusicByEvent(this.eventId).catch(() => []);
+        for (const row of challenges.sort((a, b) => Number(a.id) - Number(b.id))) {
+            await add(Number(row.liveMusicId), false);
+        }
     }
 
     private async loadBonus(store: Store, t: TextFn): Promise<void> {

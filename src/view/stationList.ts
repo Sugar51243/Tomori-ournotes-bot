@@ -3,7 +3,7 @@ import { RoomView } from '../types/Station';
 import { drawTitle, outputFinalBuffer } from '../components/list';
 import { drawBackground } from '../components/background';
 import { drawAvatar } from '../components/avatar';
-import { cleanText, wrapTextLines } from '../components/draw';
+import { cleanText, formatAgo, wrapTextLines } from '../components/draw';
 import { FONT_STACK } from '../components/fonts';
 
 /**
@@ -24,14 +24,6 @@ function formatRemain(expireAt: Date | undefined, now: number): string {
     const sec = Math.max(0, Math.round((expireAt.getTime() - now) / 1000));
     if (sec < 60) return `剩余 ${sec} 秒`;
     return `剩余 ${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
-}
-
-/** 上传时间: "x 秒/分钟前" */
-function formatAgo(time: number, now: number): string {
-    const sec = Math.max(0, Math.round((now - time) / 1000));
-    if (sec < 60) return `${sec} 秒前`;
-    if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
-    return `${Math.floor(sec / 3600)} 小时前`;
 }
 
 export async function drawStationList(rooms: RoomView[], expireAtList: (Date | undefined)[], compress: boolean): Promise<Array<Buffer | string>> {

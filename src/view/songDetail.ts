@@ -9,6 +9,10 @@ import { cardTypeColors } from '../types/Card';
 import { wrapTextLines } from '../components/draw';
 import { drawMultiServerTable } from '../components/multiServerTable';
 import { ServerRow } from '../data/serverInfo';
+import { relatedEventsFor } from '../data/relations';
+import { keywordsForEntity } from '../data/keywords';
+import { drawKeywordSection, keywordSectionHeight } from './keywordSection';
+import { drawRelatedSection, relatedSectionHeight, toRelatedItems, RelatedItem } from './relatedSection';
 import { FONT_STACK } from '../components/fonts';
 
 /**
@@ -39,10 +43,19 @@ function drawPenLight(ctx: ReturnType<ReturnType<typeof createCanvas>['getContex
 }
 
 /**
- * 内容排版(不含封面图片本体): 封面占位/ID 角标 → 右侧信息 → 难度明细 → 创作信息。
+ * 内容排版(不含封面图片本体): 封面占位/ID 角标 → 右侧信息 → 难度明细 → 创作信息 → 相关活动。
  * 返回内容结束 y, 供画布高度与绘制共用(同一段代码先跑在测量画布上即为预排版)。
+ *
+ * `relatedEvents` 在量高那一趟传空数组 —— 栏位高度由 `relatedSectionHeight` 单独算,
+ * 免得为了量高去下载缩图。
  */
-async function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>, song: Song, rows: ServerRow[]): Promise<number> {
+async function renderContent(
+    ctx: ReturnType<ReturnType<typeof createCanvas>['getContext']>,
+    song: Song,
+    rows: ServerRow[],
+    keywords: string[],
+    relatedEvents: RelatedItem[]
+): Promise<number> {
     // ---- 封面占位 ----
     ctx.fillStyle = '#222';
     ctx.fillRect(JACKET_X, JACKET_Y, JACKET_SIZE, JACKET_SIZE);
@@ -101,7 +114,10 @@ async function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['ge
     }
 
     // ---- 难度明细 ----
-    const diffY = JACKET_Y + JACKET_SIZE + 26;
+    // 位置要跟着信息块的**实际底部**走: 演唱/分类等多值行会折行, 硬编码 JACKET_Y + JACKET_SIZE + 26
+    // 会让属性/应援色压到难度色块上(实测 春日影 100091: 应援色行底 ≈344, 色块顶 338)。
+    const infoBottom = y + (song.penLightColors.length ? 20 : 0) + 2;
+    const diffY = Math.max(JACKET_Y + JACKET_SIZE + 26, infoBottom + 10);
     ctx.fillStyle = '#3a5fa8';
     ctx.fillRect(JACKET_X, diffY, 4, 20);
     ctx.fillStyle = '#FFF';
@@ -144,19 +160,30 @@ async function renderContent(ctx: ReturnType<ReturnType<typeof createCanvas>['ge
 
     // ---- 创作信息 ----
     ctx.textBaseline = 'top';
-    return drawDatablock(ctx, JACKET_X, y2, [
+    const end = drawDatablock(ctx, JACKET_X, y2, [
         { key: '作词', text: song.lyricist || '-' },
         { key: '作曲', text: song.composer || '-' },
         { key: '编曲', text: song.arranger || '-' }
     ], WIDTH - 32, { fontSize: 14 });
+
+    // ---- 关键词 / 相关活动(都没有则整块跳过) ----
+    const afterKeywords = drawKeywordSection(ctx, JACKET_X, end, WIDTH - 32, keywords);
+    return drawRelatedSection(ctx, JACKET_X, afterKeywords, WIDTH - 32, '相关活动', relatedEvents, song.server);
 }
 
 export async function drawSongDetail(song: Song, rows: ServerRow[], compress: boolean): Promise<Array<Buffer | string>> {
     // 详情需要时长/BPM(需谱面 bundle), 按需加载
     await song.loadChartInfo();
 
+    // 关联数据取数区域用页面主体渲染的那个区域(与标题/文本同源)
+    const relatedEvents = toRelatedItems(await relatedEventsFor(song.songId, song.server));
+    const keywords = await keywordsForEntity('song', song.songId);
+
     // 先量后画: 同一段排版先跑在测量画布上, 取得内容高度后建正式画布(避免底部大片空白)
-    const contentEnd = await renderContent(createCanvas(10, 10).getContext('2d'), song, rows);
+    const probe = createCanvas(10, 10).getContext('2d');
+    const contentEnd = await renderContent(probe, song, rows, [], [])
+        + keywordSectionHeight(probe, keywords, WIDTH - 32)
+        + relatedSectionHeight(WIDTH - 32, relatedEvents.length);
     const HEIGHT = Math.max(contentEnd, JACKET_Y + JACKET_SIZE) + MARGIN;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
@@ -164,7 +191,7 @@ export async function drawSongDetail(song: Song, rows: ServerRow[], compress: bo
     await drawBackground(ctx, WIDTH, HEIGHT, { server: song.server, bandId: song.bandId });
     drawTitle(ctx, WIDTH, '歌曲详情');
 
-    await renderContent(ctx, song, rows);
+    await renderContent(ctx, song, rows, keywords, relatedEvents);
 
     // 封面图片 + ID 角标(位置固定, 不影响排版; 角标须画在封面之上)
     if (song.row) {

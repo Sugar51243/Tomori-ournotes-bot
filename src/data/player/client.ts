@@ -3,13 +3,13 @@ import { config } from '../../config';
 import { logger } from '../../logger';
 import { http } from '../http';
 import { Server } from '../../types/Server';
-import { PlayerProfile, PlayerNotFoundError, PlayerUnavailableError } from '../../types/Player';
+import { PlayerProfile, PlayerNotFoundError, PlayerUnavailableError, PlayerSource } from '../../types/Player';
 
 /**
  * 玩家档案客户端。
  *
  * 数据源自动选择: 配了 MOENOTES_API_BASE + MOENOTES_API_KEY 就走向自建网关(能查任意玩家),
- * 否则回退站点公开接口 —— 后者只对「在 StarMoe 已验证且设为公开」的账号有数据, 其余 404。
+ * 否则回退站点公开接口 —— 后者只对「在站点添加并验证了游戏账号、且个人主页已公开」的账号有数据, 其余 404。
  *
  * 结果按 PLAYER_TTL_S 缓存在**内存**里(不落盘: 网关那条路径带 Authorization)。
  */
@@ -76,20 +76,21 @@ async function fetchFromSite(server: Server, profileId: string): Promise<PlayerP
     return normalize(server, profileId, data);
 }
 
-function classifyError(e: unknown): Error {
+/** 出错时按**实际用的数据源**给指引: 站点路径提示去绑定/公开, 网关路径提示查网关本身 */
+function classifyError(e: unknown, source: PlayerSource): Error {
     if (axios.isAxiosError(e)) {
         const status = e.response?.status;
-        if (status === 404) return new PlayerNotFoundError();
+        if (status === 404) return new PlayerNotFoundError(source);
         if (status === 401 || status === 403) {
-            return new PlayerUnavailableError('玩家数据源拒绝访问(MOENOTES_API_KEY 无效?)');
+            return new PlayerUnavailableError('玩家数据源拒绝访问(MOENOTES_API_KEY 无效?)', source);
         }
-        if (status === 503) return new PlayerUnavailableError('玩家数据源上游未就绪');
-        return new PlayerUnavailableError(`玩家数据源请求失败(${status ?? 'network'})`);
+        if (status === 503) return new PlayerUnavailableError('玩家数据源上游未就绪', source);
+        return new PlayerUnavailableError(`玩家数据源请求失败(${status ?? 'network'})`, source);
     }
-    return new PlayerUnavailableError(e instanceof Error ? e.message : String(e));
+    return new PlayerUnavailableError(e instanceof Error ? e.message : String(e), source);
 }
 
-/** 查询玩家档案; 未公开/不存在 -> PlayerNotFoundError, 上游故障 -> PlayerUnavailableError */
+/** 查询玩家档案; 未绑定/未公开/不存在 -> PlayerNotFoundError, 上游故障 -> PlayerUnavailableError */
 export async function getPlayerProfile(server: Server, profileId: string): Promise<PlayerProfile> {
     const cacheKey = `${server}/${profileId}`;
     const hit = cache.get(cacheKey);
@@ -108,7 +109,7 @@ export async function getPlayerProfile(server: Server, profileId: string): Promi
             cache.set(cacheKey, { at: Date.now(), value });
             return value;
         } catch (e) {
-            throw classifyError(e);
+            throw classifyError(e, source);
         }
     })().finally(() => { inflight.delete(cacheKey); });
 

@@ -7,6 +7,8 @@ import { drawBackground } from '../components/background';
 import { wrapTextLines } from '../components/draw';
 import { drawCardSections, cardSectionsHeight, CARD_LIST_WIDTH, CARD_LIST_MARGIN } from './cardList';
 import { isMemberCard } from '../search';
+import { relatedEventsOfGacha } from '../data/relations';
+import { drawRelatedSection, relatedSectionHeight, toRelatedItems } from './relatedSection';
 import { FONT_STACK } from '../components/fonts';
 
 /**
@@ -24,6 +26,9 @@ export async function drawGachaDetail(gacha: Gacha, compress: boolean): Promise<
     const pickUps = gacha.pickUpCards;
     const sectionsHeight = pickUps.length ? 44 + cardSectionsHeight(pickUps) : 0;
     const contentWidth = WIDTH - MARGIN * 2;
+    // 相关活动: 上游没有「卡池→活动」字段, 按 UP 卡重合 + 时间重叠推断(见 data/relations.ts)
+    const relatedEvents = toRelatedItems(await relatedEventsOfGacha(gacha.server, gacha.gachaId));
+    const relatedHeight = relatedSectionHeight(contentWidth, relatedEvents.length);
 
     // ---- 横幅: 先取图确定贴合尺寸(排版与画布高度都依赖它) ----
     let banner: Awaited<ReturnType<typeof loadImage>> | undefined;
@@ -65,7 +70,7 @@ export async function drawGachaDetail(gacha: Gacha, compress: boolean): Promise<
     }
     contentEnd = drawDatablock(probe, MARGIN, contentEnd + 10, blockRows, contentWidth, { fontSize: 15 });
 
-    const HEIGHT = contentEnd + sectionsHeight + MARGIN;
+    const HEIGHT = contentEnd + sectionsHeight + relatedHeight + MARGIN;
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
     await drawBackground(ctx, WIDTH, HEIGHT);
@@ -111,6 +116,9 @@ export async function drawGachaDetail(gacha: Gacha, compress: boolean): Promise<
         const pickUpIds = new Set(pickUps.map(c => (isMemberCard(c) ? c.cardId : c.supportCardId)));
         await drawCardSections(ctx, pickUps, y + 44, pickUpIds);
     }
+
+    // ---- 相关活动 ----
+    await drawRelatedSection(ctx, MARGIN, y + sectionsHeight, contentWidth, '相关活动', relatedEvents, gacha.server);
 
     return [await outputFinalBuffer(canvas, compress)];
 }

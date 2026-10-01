@@ -9,6 +9,10 @@ import { ServerRow } from '../data/serverInfo';
 import { AnyCard, isMemberCard } from '../search';
 import { formatGameDateUTC8 } from '../types/Gacha';
 import { SkillInfo } from '../data/skills';
+import { relatedForCard } from '../data/relations';
+import { keywordsForEntity } from '../data/keywords';
+import { drawKeywordSection, keywordSectionHeight } from './keywordSection';
+import { drawRelatedSection, relatedSectionHeight, toRelatedItems } from './relatedSection';
 import { FONT_STACK } from '../components/fonts';
 
 /**
@@ -111,6 +115,13 @@ export async function drawCardDetail(card: AnyCard, rows: ServerRow[], compress:
     const blocks = buildSkillBlocks(card, member);
     const infoRows = buildRows(card);
 
+    // 相关卡池 / 相关活动 / 用户关键词(取数区域与页面主体一致): 没有则整块跳过
+    const entityId = member ? card.cardId : card.supportCardId;
+    const related = await relatedForCard(card.server, member ? 'member' : 'support', entityId);
+    const relatedGachas = toRelatedItems(related.gachas);
+    const relatedEvents = toRelatedItems(related.events);
+    const keywords = await keywordsForEntity(member ? 'card' : 'supportCard', entityId);
+
     // 卡面: 先取图并按原始比例算贴合尺寸 —— 卡面不再铺占位背景, 排版高度也随实际卡面收缩
     const art = await loadArt(card);
     const artMaxW = member ? ART_MAX_W : SUPPORT_ART_W;
@@ -139,7 +150,12 @@ export async function drawCardDetail(card: AnyCard, rows: ServerRow[], compress:
         : 0;
     // 各服信息块(单图多服: 每服一行, 行首国旗)
     const multiHeight = rows.length ? multiServerTableHeight(rows.length) + 34 : 0;
-    const HEIGHT = SKILLS_Y + skillsHeight + multiHeight + 16;
+    // 关联栏位通栏(不受角色卡右侧信息区的窄宽度限制)
+    const relatedWidth = WIDTH - MARGIN * 2;
+    const relatedHeight = relatedSectionHeight(relatedWidth, relatedGachas.length)
+        + relatedSectionHeight(relatedWidth, relatedEvents.length)
+        + keywordSectionHeight(measure, keywords, relatedWidth);
+    const HEIGHT = SKILLS_Y + skillsHeight + multiHeight + relatedHeight + 16;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
@@ -245,6 +261,7 @@ export async function drawCardDetail(card: AnyCard, rows: ServerRow[], compress:
     }
 
     // ---- 各服信息 ----
+    let afterMulti = SKILLS_Y + skillsHeight;
     if (rows.length) {
         const my = SKILLS_Y + skillsHeight + 18;
         ctx.fillStyle = '#3a5fa8';
@@ -253,8 +270,13 @@ export async function drawCardDetail(card: AnyCard, rows: ServerRow[], compress:
         ctx.font = `bold 17px ${CJK}`;
         ctx.textBaseline = 'middle';
         ctx.fillText('各服信息', 30, my + 10);
-        await drawMultiServerTable(ctx, 16, my + 26, WIDTH - 32, rows);
+        afterMulti = await drawMultiServerTable(ctx, 16, my + 26, WIDTH - 32, rows);
     }
+
+    // ---- 关键词 / 相关卡池 / 相关活动 ----
+    let ry = drawKeywordSection(ctx, MARGIN, afterMulti, relatedWidth, keywords);
+    ry = await drawRelatedSection(ctx, MARGIN, ry, relatedWidth, '相关卡池', relatedGachas, card.server);
+    await drawRelatedSection(ctx, MARGIN, ry, relatedWidth, '相关活动', relatedEvents, card.server);
 
     return [await outputFinalBuffer(canvas, compress)];
 }

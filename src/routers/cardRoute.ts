@@ -39,7 +39,7 @@ export async function commandCard(servers: Server[], input: string | FuzzySearch
         return ['错误: 该卡不存在'];
     }
     const bodyServer = servers[0];
-    const matches = typeof input === 'string' ? textToFuzzyResult(bodyServer, input) : input;
+    const matches = typeof input === 'string' ? await textToFuzzyResult(bodyServer, input) : input;
     if (Object.keys(matches).length == 0) {
         return ['错误: 没有有效的关键词'];
     }

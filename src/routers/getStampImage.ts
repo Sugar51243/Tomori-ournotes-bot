@@ -82,7 +82,7 @@ export async function commandGetStampImage(server: Server, query: StampQuery): P
     }
     let stamps;
     if (query.fuzzySearchResult || keyword) {
-        const matches = query.fuzzySearchResult ?? textToFuzzyResult(server, keyword);
+        const matches = query.fuzzySearchResult ?? await textToFuzzyResult(server, keyword);
         if (Object.keys(matches).length === 0) {
             return ['错误: 没有有效的关键词'];
         }

@@ -1,6 +1,6 @@
 {
   "name": "tomori",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Tomori - BanG Dream! Our Notes 后端 API(实时代理 bdon.moe 数据, 响应与 tsugu 兼容)",
   "main": "dist/app.js",

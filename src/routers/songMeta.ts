@@ -3,13 +3,24 @@ import { body } from 'express-validator';
 import { listToBase64 } from './utils';
 import { isServer, isServerList, pickServers, Server, withServer } from '../types/Server';
 import { middleware } from './middleware';
-import { refreshRegion, storeFor } from '../data/region';
+import { storeFor } from '../data/region';
 import { Song } from '../types/Song';
+import { getMusicData, rankCharts } from '../data/musicData/client';
 import { drawSongMetaList } from '../view/songMetaList';
 
+/**
+ * 歌曲meta · 效率排行(参考站点「歌曲meta」的算法, 数据与其同源)。
+ *
+ * 一图两榜: 击奏live 与 自由live 各自效率(分/综合力/分钟)最高的前 15 张谱面,
+ * 难度**四难度混排**(EZ/NM/HD/EX 一起参与排行), 时长取 BGM 时长。
+ *
+ * 效率数值与服务器无关(同一份谱面模拟数据), 服务器的选择只决定曲名/乐团的显示语言
+ * 与封面的取图区域 —— 沿用「曲目本体优先港澳台, 无则日服」的规则。
+ */
 const router = express.Router();
 
-router.post('/',
+router.post(
+    '/',
     [
         body('displayedServerList').custom(isServerList),
         body('mainServer').custom(isServer),
@@ -29,28 +40,23 @@ router.post('/',
 );
 
 export async function commandSongMeta(servers: Server[], compress: boolean): Promise<Array<Buffer | string>> {
-    // 曲目集合取所选服的并集(默认四服时即港澳台 ∪ 日服, 日服独有曲也能列出来);
-    // 每首歌实际显示哪一服的一行, 由视图按「港澳台 -> 日服」优先决定
-    const songIds: number[] = [];
-    for (const server of servers) {
-        await refreshRegion(server);
-        for (const row of await storeFor(server).songs()) {
-            if (!songIds.includes(row.id)) songIds.push(row.id);
-        }
+    const bodyServer = servers[0];
+    const data = await getMusicData();
+    if (!data) return ['错误: 谱面效率数据暂不可用, 请稍后再试'];
+
+    const battle = rankCharts(data, 'battle', 15);
+    const free = rankCharts(data, 'free', 15);
+
+    // 曲目本体(标题/乐团/封面)按所选服取: 港澳台 -> 日服 -> 第一个收录的服
+    const ids = [...new Set([...battle, ...free].map(r => r.musicId))];
+    const songs = new Map<number, Song>();
+    for (const id of ids) {
+        const song = withServer(new Song(id), await firstOwner(id, servers));
+        await song.init();
+        if (song.isExist) songs.set(id, song);
     }
 
-    const songs: Song[] = [];
-    for (const id of songIds) {
-        // 曲目本体(标题/乐队/分类)同样优先港澳台, 无则日服
-        const owner = await firstOwner(id, servers);
-        const song = withServer(new Song(id), owner);
-        await song.init();
-        if (!song.isExist) continue;
-        // 全歌曲表的时长列: 仅读谱面清单(不含 BPM, 避免为 85 首下载音符文件)
-        await song.loadChartInfo(false);
-        songs.push(song);
-    }
-    return drawSongMetaList(songs, servers, compress);
+    return drawSongMetaList(bodyServer, battle, free, songs, compress);
 }
 
 /** 该曲本体取哪个服的数据: 港澳台 -> 日服 -> 第一个收录的服 */

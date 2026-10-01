@@ -35,6 +35,51 @@ export function drawDatablock(ctx: SKRSContext2D, startX: number, startY: number
     return y;
 }
 
+/** 区块标题(左侧 4px 竖条 + 粗体文字)的行高 */
+export const SECTION_TITLE_H = 20;
+
+/**
+ * 区块标题: 各详情图里「技能 / 各服信息 / 难度」等小标题的统一画法
+ * (cardList.ts、cardDetail.ts、songDetail.ts 等原先各写了一份同样的代码)。
+ * @returns 标题块的底边 y(= y + SECTION_TITLE_H), 便于调用方接着往下排
+ */
+export function drawSectionTitle(
+    ctx: SKRSContext2D,
+    x: number,
+    y: number,
+    text: string,
+    options?: { color?: string; fontSize?: number }
+): number {
+    ctx.fillStyle = options?.color ?? '#3a5fa8';
+    ctx.fillRect(x, y, 4, SECTION_TITLE_H);
+    ctx.fillStyle = '#FFF';
+    ctx.font = `bold ${options?.fontSize ?? 17}px ${FONT_STACK}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, x + 14, y + SECTION_TITLE_H / 2);
+    return y + SECTION_TITLE_H;
+}
+
+/** 分区标题带高度(通铺底色 + 左侧竖条) */
+export const SECTION_BAND_H = 26;
+
+/**
+ * 分区标题带: 通铺底色 + 左侧竖条, 让出图的分区一眼能分开(活动详情/活动榜线共用)。
+ * @returns 分区内容的起始 y(= y + SECTION_BAND_H + 6)
+ */
+export function drawSectionBand(ctx: SKRSContext2D, width: number, y: number, title: string, margin = 16): number {
+    ctx.fillStyle = 'rgba(58, 95, 168, 0.30)';
+    ctx.fillRect(0, y, width, SECTION_BAND_H);
+    ctx.fillStyle = '#5b8fe0';
+    ctx.fillRect(margin, y + 4, 4, SECTION_BAND_H - 8);
+    ctx.font = `bold 15px ${FONT_STACK}`;
+    ctx.fillStyle = '#FFF';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText(title, margin + 14, y + SECTION_BAND_H / 2, width - margin * 2 - 20);
+    return y + SECTION_BAND_H + 6;
+}
+
 /** 页头主标题带高度 */
 export const TITLE_BAND_H = 48;
 /** 页头副信息带高度(服务器行/说明文字) */

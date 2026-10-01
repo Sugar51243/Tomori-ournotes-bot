@@ -187,7 +187,14 @@ function formatRange(e: Event): string {
     return `${fmt(e.startAt)} ${fmt(e.endAt)}`;
 }
 
-/** text -> 模糊搜索结果(按区域分片的索引) */
-export function textToFuzzyResult(server: Server, text: string): FuzzySearchResult {
+/**
+ * text -> 模糊搜索结果(按区域分片的索引)。
+ *
+ * 必须**先确保索引已装载**再解析: 索引未装载时所有词都会落到 `_all` 子串回退,
+ * 用户关键词解析不成实体 id, 搜索就会莫名其妙地搜不到。
+ * 因此这个函数是 async 的, 调用方一律 await(内部 ensureFuzzyIndex 有磁盘缓存, 代价很低)。
+ */
+export async function textToFuzzyResult(server: Server, text: string): Promise<FuzzySearchResult> {
+    await ensureFuzzyIndex(server);
     return fuzzySearch(server, text);
 }

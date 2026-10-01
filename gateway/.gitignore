@@ -1,0 +1,7 @@
+# 运行时目录: 含 api_key 与游戏账号密码, 绝不入库
+data/
+accounts/
+
+# 兜底: 万一被拷到别处
+*.toml
+*.ps1.bak

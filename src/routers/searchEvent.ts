@@ -9,6 +9,7 @@ import { Event } from '../types/Event';
 import { eventServerRows } from '../data/serverInfo';
 import { drawEventRichDetail } from '../view/eventRichDetail';
 import { drawEventDetail } from '../view/eventDetail';
+import { drawEventList } from '../view/eventList';
 import { searchEvents, textToFuzzyResult } from '../search';
 
 const router = express.Router();
@@ -69,7 +70,7 @@ export async function commandEvent(servers: Server[], input: string | FuzzySearc
 
     // 模糊搜索: 先在请求的服上搜; 搜不到且只请求了一个服时, 放宽到全部服再试
     const bodyServer = servers[0];
-    const matches = typeof input === 'string' ? textToFuzzyResult(bodyServer, input) : input;
+    const matches = typeof input === 'string' ? await textToFuzzyResult(bodyServer, input) : input;
     if (Object.keys(matches).length == 0) {
         return ['错误: 没有有效的关键词'];
     }
@@ -77,11 +78,15 @@ export async function commandEvent(servers: Server[], input: string | FuzzySearc
     if (primary.length === 0) {
         for (const fallback of servers.length === 1 ? SERVER_LIST.filter(s => s !== bodyServer) : []) {
             const hits = await searchEvents(fallback, matches).catch(() => []);
-            if (hits.length) {
-                return drawEventCombined(hits[0].eventId, [...SERVER_LIST], compress);
-            }
+            // 多命中同样是列表图(与该服自身搜到时的处理一致)
+            if (hits.length > 1) return drawEventList(fallback, hits, compress);
+            if (hits.length) return drawEventCombined(hits[0].eventId, [...SERVER_LIST], compress);
         }
         return ['没有搜索到符合条件的活动'];
+    }
+    if (primary.length > 1) {
+        // 命中多个活动 -> 活动列表图(不再默认只画第一个)
+        return drawEventList(bodyServer, primary, compress);
     }
     const event = primary[0];
     if (servers.length === 1) {

@@ -19,6 +19,7 @@ import { gachaSimulateRouter } from './routers/gachaSimulate';
 import { getCardIllustrationRouter } from './routers/getCardIllustration';
 import { getStampImageRouter } from './routers/getStampImage';
 import { friendUploadRouter, friendDeleteRouter, friendListRouter } from './routers/friendRoute';
+import { keywordUploadRouter, keywordDeleteRouter } from './routers/keywordRoute';
 import { stationRouter } from './routers/station';
 import { roomListRouter } from './routers/roomList';
 import { songRandomRouter } from './routers/songRandom';
@@ -26,6 +27,8 @@ import { fuzzySearchRouter } from './routers/fuzzySearch';
 import { announcementRouter } from './routers/announcementRoute';
 import { createAnnouncementStreamRouter } from './routers/announcementStream';
 import { playerRouter } from './routers/playerRoute';
+import { eventRankingRouter } from './routers/eventRanking';
+import { eventRecommendRouter } from './routers/eventRecommend';
 import { gatewayConfigured } from './data/player/client';
 import { disabledRouter } from './routers/disabled';
 import { renderCacheMiddleware } from './routers/renderCache';
@@ -87,7 +90,9 @@ if (config.enableDb) {
 } else {
     logger('app', 'ENABLE_DB=false, community features (friend/station) stay disabled');
 }
-app.use('/cutoffAll', disabledRouter());
+app.use('/eventRanking', eventRankingRouter);              // 活动榜线/排行榜(单服, 用户动态数据)
+app.use('/eventRecommend', eventRecommendRouter);          // 活动推荐曲(单服, 静态数据+活动报酬)
+app.use('/cutoffAll', eventRankingRouter);                 // tsugu 兼容: 榜线接口名(补全原 404 占位)
 app.use('/cutoffDetail', disabledRouter());
 app.use('/cutoffListOfRecentEvent', disabledRouter());
 app.use('/user', disabledRouter());                        // tsugu 的 /user 是账号绑定 API, 本服务不实现
@@ -95,6 +100,8 @@ app.use('/user', disabledRouter());                        // tsugu 的 /user �
 app.use('/friend/upload', config.enableDb ? friendUploadRouter : disabledRouter());
 app.use('/friend/delete', config.enableDb ? friendDeleteRouter : disabledRouter());
 app.use('/friend/list', config.enableDb ? friendListRouter : disabledRouter());
+app.use('/keyword/upload', config.enableDb ? keywordUploadRouter : disabledRouter());
+app.use('/keyword/delete', config.enableDb ? keywordDeleteRouter : disabledRouter());
 app.use('/station', config.enableDb ? stationRouter : disabledRouter());
 app.use('/roomList', config.enableDb ? roomListRouter : disabledRouter());
 

@@ -1,12 +1,14 @@
 import { createCanvas, loadImage, Image, SKRSContext2D } from '@napi-rs/canvas';
-import { Event, EventCardRef, EventRewardItem } from '../types/Event';
+import { Event, EventCardRef, EventRewardItem, eventTypeLabel } from '../types/Event';
 import { Server, serverProfile } from '../types/Server';
 import { imageBuffer, assetCacheKey, cardThumbUrl, supportCardThumbUrl, itemIconUrl, jacketUrl } from '../data/assets';
 import { eventArtImage, eventAssetImage } from './eventArt';
-import { drawTitle, drawMetaBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H } from '../components/list';
+import { drawTitle, drawMetaBand, drawSectionBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H } from '../components/list';
 import { drawBackground } from '../components/background';
 import { drawServerIcon } from '../components/serverIcon';
-import { fillTextCentered } from '../components/draw';
+import { relatedGachasOfEvent } from '../data/relations';
+import { drawRelatedSection, relatedSectionHeight, toRelatedItems } from './relatedSection';
+import { fillTextCentered, formatDateTime } from '../components/draw';
 import { FONT_STACK, cjkFontFamily } from '../components/fonts';
 
 /**
@@ -52,8 +54,6 @@ function bannerFullHeight(img: Image | undefined): number {
     if (!img || !img.width) return 0;
     return WIDTH * img.height / img.width;
 }
-/** 区块标题带 */
-const SECTION_H = 26;
 const ROW_H = 22;
 /** 点数奖励: 每行 6 格 */
 const MILESTONE_COLUMNS = 6;
@@ -93,12 +93,6 @@ function humanDuration(ms: number): string {
     return `${m}分`;
 }
 
-function fmtDate(d?: Date): string {
-    if (!d) return '-';
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 function statusText(event: Event): string {
     const now = new Date();
     const status = event.status(now);
@@ -110,16 +104,24 @@ function statusText(event: Event): string {
 
 /** 区块标题带: 通铺底色 + 左侧竖条, 让分区一眼能分开 */
 function section(ctx: Ctx, y: number, title: string): number {
-    ctx.fillStyle = 'rgba(58, 95, 168, 0.30)';
-    ctx.fillRect(0, y, WIDTH, SECTION_H);
-    ctx.fillStyle = '#5b8fe0';
-    ctx.fillRect(MARGIN, y + 4, 4, SECTION_H - 8);
-    ctx.font = `bold 15px ${CJK}`;
+    return drawSectionBand(ctx, WIDTH, y, title, MARGIN);
+}
+
+/** 活动新曲角标: 黑框红底白字, 紧跟在曲目 ID 右方(与 ID 同行) */
+function drawNewSongBadge(ctx: Ctx, x: number, centerY: number): void {
+    const text = '活动新曲';
+    ctx.font = cjkFontFamily(9);
+    const w = Math.ceil(ctx.measureText(text).width) + 8;
+    const h = 14;
+    ctx.fillStyle = '#c8102e';
+    ctx.fillRect(x, centerY - h / 2, w, h);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, centerY - h / 2 + 0.5, w - 1, h - 1);
     ctx.fillStyle = '#FFF';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    fillTextCentered(ctx, text, x + w / 2, centerY, w - 4);
     ctx.textAlign = 'left';
-    ctx.fillText(title, MARGIN + 14, y + SECTION_H / 2);
-    return y + SECTION_H + 6;
 }
 
 /** 细分割线 */
@@ -263,13 +265,13 @@ async function renderContent(ctx: Ctx, server: Server, event: Event, bannerH: nu
     ctx.fillText(event.typeLabel(), leftX, y + 32, rightX - leftX - 24);
 
     const timeRows: Array<[string, string]> = [
-        ['开放时间', fmtDate(event.startAt)],
-        ['结束时间', fmtDate(event.endAt)],
+        ['开放时间', formatDateTime(event.startAt)],
+        ['结束时间', formatDateTime(event.endAt)],
         ['总时长', event.durationMs() !== undefined ? humanDuration(event.durationMs()!) : '-'],
         ['状态', statusText(event)]
     ];
     if (event.displayEndAt && event.displayEndAt.getTime() !== event.endAt?.getTime()) {
-        timeRows.push(['展示结束', fmtDate(event.displayEndAt)]);
+        timeRows.push(['展示结束', formatDateTime(event.displayEndAt)]);
     }
     let ty = y + 56;
     ctx.textBaseline = 'middle';
@@ -302,27 +304,35 @@ async function renderContent(ctx: Ctx, server: Server, event: Event, bannerH: nu
     ctx.strokeRect(MARGIN + 0.5, y - 6.5, WIDTH - MARGIN * 2 - 1, panelBottom - y + 18);
     y = panelBottom + 18;
 
-    // ---- 2.5 活动歌曲(基础信息栏下方) ----
+    // ---- 2.5 相关曲目(基础信息栏下方): 活动新曲在前, 后接挑战曲(多为老歌) ----
     if (event.songs.length) {
-        y = section(ctx, y, `活动歌曲（${event.songs.length}）`);
+        const typeTag = eventTypeLabel(event.eventType);
+        y = section(ctx, y, `相关曲目（${event.songs.length}）${typeTag ? `(${typeTag})` : ''}`);
         const SIZE = 46;
-        let sx = MARGIN + 4;
-        for (const song of event.songs) {
+        const CELL = SIZE + 6 + 202;
+        // 曲目多了要换行: 每行按画布宽算得下几个, 测量与绘制走同一套算术
+        const cols = Math.max(1, Math.floor((WIDTH - MARGIN * 2 - 4) / CELL));
+        for (const [i, song] of event.songs.entries()) {
+            const sx = MARGIN + 4 + (i % cols) * CELL;
+            const sy = y + Math.floor(i / cols) * (SIZE + 10);
             ctx.fillStyle = '#222';
-            ctx.fillRect(sx, y, SIZE, SIZE);
+            ctx.fillRect(sx, sy, SIZE, SIZE);
             const cover = await eventAssetImage(server, `Image/Jacket/${song.jacketAssetName}/${song.jacketAssetName}.webp`, `jacket/${song.jacketAssetName}.webp`);
-            if (cover) ctx.drawImage(cover, sx, y, SIZE, SIZE);
+            if (cover) ctx.drawImage(cover, sx, sy, SIZE, SIZE);
+            const tx = sx + SIZE + 8;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'top';
             ctx.font = 'bold 12px "Arial"';
             ctx.fillStyle = '#7ec8ff';
-            ctx.fillText(`ID ${song.musicId}`, sx + SIZE + 8, y + 4, 200);
+            const idText = `ID ${song.musicId}`;
+            ctx.fillText(idText, tx, sy + 4, 160);
+            // 新曲角标跟在 ID 右方(与 ID 同一行居中)
+            if (song.isNew) drawNewSongBadge(ctx, tx + ctx.measureText(idText).width + 6, sy + 11);
             ctx.font = cjkFontFamily(13);
             ctx.fillStyle = '#FFF';
-            ctx.fillText(song.title, sx + SIZE + 8, y + 24, 200);
-            sx += SIZE + 6 + 202;
+            ctx.fillText(song.title, tx, sy + 24, 200);
         }
-        y += SIZE + 10;
+        y += Math.ceil(event.songs.length / cols) * (SIZE + 10);
     }
 
     // ---- 3. 加成对象 ----
@@ -490,7 +500,12 @@ export async function drawEventRichDetail(server: Server, event: Event, compress
     const logoImg = await eventArtImage(event, 'logo');
     const bannerH = bannerHeightFor(bannerImg);
 
-    const contentEnd = await renderContent(createCanvas(10, 10).getContext('2d'), server, event, bannerH, bannerImg, logoImg);
+    // 相关卡池: 上游没有「活动→卡池」字段, 按 UP 卡重合 + 时间重叠推断(见 data/relations.ts)。
+    // 量高那趟不传数据, 栏位高度单独加 —— 免得为了量高去下载缩图。
+    const relatedGachas = toRelatedItems(await relatedGachasOfEvent(server, event.eventId));
+    const relatedWidth = WIDTH - MARGIN * 2;
+    const contentEnd = await renderContent(createCanvas(10, 10).getContext('2d'), server, event, bannerH, bannerImg, logoImg)
+        + relatedSectionHeight(relatedWidth, relatedGachas.length);
     const height = contentEnd + MARGIN;
 
     const canvas = createCanvas(WIDTH, height);
@@ -515,7 +530,10 @@ export async function drawEventRichDetail(server: Server, event: Event, compress
     ctx.fillStyle = '#8fd0ff';
     fillTextCentered(ctx, event.typeLabel(), hx, metaMidY, WIDTH - MARGIN - hx);
 
-    await renderContent(ctx, server, event, bannerH, bannerImg, logoImg);
+    const end = await renderContent(ctx, server, event, bannerH, bannerImg, logoImg);
+
+    // ---- 相关卡池 ----
+    await drawRelatedSection(ctx, MARGIN, end, relatedWidth, '相关卡池', relatedGachas, server);
 
     return [await outputFinalBuffer(canvas, compress)];
 }

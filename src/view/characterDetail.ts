@@ -7,6 +7,8 @@ import { wrapTextLines } from '../components/draw';
 import { FONT_STACK } from '../components/fonts';
 import { drawMultiServerTable } from '../components/multiServerTable';
 import { ServerRow } from '../data/serverInfo';
+import { keywordsForEntity } from '../data/keywords';
+import { drawKeywordSection, keywordSectionHeight } from './keywordSection';
 
 /**
  * 角色详情信息图: 尽量展开全部信息 ——
@@ -129,10 +131,15 @@ export async function drawCharacterDetail(character: Character, rows: ServerRow[
     }
     const boxH = iconBoxHeight(portrait ? portrait.width / portrait.height : 1);
 
+    // 用户关键词(没有则整块跳过)
+    const keywords = await keywordsForEntity('character', character.characterId);
+    const keywordWidth = WIDTH - MARGIN * 2;
+
     // 先量后画: 同一段排版先跑在测量画布上, 取得内容高度后再建正式画布
-    const contentEnd = renderContent(createCanvas(10, 10).getContext('2d'), character, boxH);
+    const probe = createCanvas(10, 10).getContext('2d');
+    const contentEnd = renderContent(probe, character, boxH);
     const multiHeight = rows.length ? 34 + rows.length * 26 : 0;
-    const HEIGHT = contentEnd + multiHeight + MARGIN;
+    const HEIGHT = contentEnd + multiHeight + keywordSectionHeight(probe, keywords, keywordWidth) + MARGIN;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
@@ -141,6 +148,7 @@ export async function drawCharacterDetail(character: Character, rows: ServerRow[
 
     const endY = renderContent(ctx, character, boxH);
     // 各服信息(单图多服: 每服一行, 行首国旗)
+    let afterMulti = endY;
     if (rows.length) {
         ctx.fillStyle = '#3a5fa8';
         ctx.fillRect(MARGIN, endY, 4, 20);
@@ -148,8 +156,10 @@ export async function drawCharacterDetail(character: Character, rows: ServerRow[
         ctx.font = `bold 17px ${FONT_STACK}`;
         ctx.textBaseline = 'middle';
         ctx.fillText('各服信息', MARGIN + 14, endY + 10);
-        await drawMultiServerTable(ctx, MARGIN, endY + 26, WIDTH - MARGIN * 2, rows);
+        afterMulti = await drawMultiServerTable(ctx, MARGIN, endY + 26, WIDTH - MARGIN * 2, rows);
     }
+    // 用户关键词
+    drawKeywordSection(ctx, MARGIN, afterMulti, keywordWidth, keywords);
     // 立绘按原始比例贴合框内(不拉伸)
     if (portrait) {
         const scale = Math.min(ICON_W / portrait.width, boxH / portrait.height);

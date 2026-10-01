@@ -86,3 +86,22 @@ export function formatTime(ms: number): string {
     const totalSec = Math.floor(ms / 1000);
     return `${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')}`;
 }
+
+/**
+ * 相对时间: x 秒/分钟/小时/天前。
+ * 负数(本地时钟比数据源慢)一律按 0 处理, 免得出现「-3 秒前」。
+ */
+export function formatAgo(timeMs: number, nowMs: number): string {
+    const sec = Math.max(0, Math.round((nowMs - timeMs) / 1000));
+    if (sec < 60) return `${sec} 秒前`;
+    if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
+    return `${Math.floor(sec / 86400)} 天前`;
+}
+
+/** 本地时间 yyyy/MM/dd HH:mm */
+export function formatDateTime(d?: Date): string {
+    if (!d) return '-';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}

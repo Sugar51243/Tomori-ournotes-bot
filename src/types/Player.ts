@@ -4,8 +4,12 @@
  * 两个来源返回同一套形状(都是 moenotes 的 protobuf JSON 投影, int64 一律为十进制字符串):
  * - 自建网关 moenotes-api: GET {MOENOTES_API_BASE}/v1/{server}/profile/{id}
  * - 站点公开接口:        GET {MOENOTES_SITE_BASE}/api/players/{server}/{id}
- *   —— 后者只对「在 StarMoe 已验证且设为公开」的账号有数据, 其余 404。
+ *   —— 只要「在站点添加并验证了游戏账号、且把个人主页设为公开」的账号才有数据, 其余一律 404。
+ *   查询失败时的提示统一引导用户去 ACCOUNT_BIND_URL 绑定并公开(见下)。
  */
+
+/** 站点账号页: 添加/验证游戏账号、把个人主页设为公开都在这里 */
+export const ACCOUNT_BIND_URL = 'https://bdon.moe/account';
 export interface PlayerProfile {
     server: string;
     profileId: string;
@@ -23,16 +27,28 @@ export interface PlayerProfile {
     fetchedAt?: number;
 }
 
+/** 数据源: 自建网关能查任意玩家, 站点公开接口只能查「已绑定且已公开」的账号 */
+export type PlayerSource = 'gateway' | 'site';
+
 export class PlayerNotFoundError extends Error {
-    constructor(message = '该账号未公开或不存在') {
-        super(message);
+    /**
+     * 站点路径查不到时**优先**给出「去站点绑定并公开」的指引 —— 这是现在查不到的最主要原因;
+     * 自建网关能查任意玩家, 它还查不到就说明 ID 确实不存在, 不该再让人去绑定。
+     */
+    constructor(source: PlayerSource = 'site') {
+        super(source === 'gateway'
+            ? '该账号不存在'
+            : `查询不到该账号。请先到 ${ACCOUNT_BIND_URL} 添加并验证游戏账号，再把个人主页设为「公开」（公开后任何拿到链接的人都能查看）`);
         this.name = 'PlayerNotFoundError';
     }
 }
 
 export class PlayerUnavailableError extends Error {
-    constructor(message = '玩家数据源暂不可用') {
-        super(message);
+    constructor(message = '玩家数据源暂不可用', source: PlayerSource = 'site') {
+        const hint = source === 'gateway'
+            ? '请检查自建网关是否在运行、MOENOTES_API_BASE / MOENOTES_API_KEY 是否正确'
+            : `若持续失败，请到 ${ACCOUNT_BIND_URL} 确认游戏账号已添加、已验证且个人主页已公开`;
+        super(`${message}；${hint}`);
         this.name = 'PlayerUnavailableError';
     }
 }

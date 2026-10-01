@@ -57,7 +57,7 @@ export async function commandSong(servers: Server[], input: string | FuzzySearch
     }
     // 列表查询: 主体区域按服列表顺序取第一个
     const bodyServer = servers[0];
-    const matches = typeof input === 'string' ? textToFuzzyResult(bodyServer, input) : input;
+    const matches = typeof input === 'string' ? await textToFuzzyResult(bodyServer, input) : input;
     if (Object.keys(matches).length == 0) {
         return ['错误: 没有有效的关键词'];
     }

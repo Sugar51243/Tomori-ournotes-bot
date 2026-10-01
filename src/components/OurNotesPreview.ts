@@ -509,10 +509,12 @@ function drawNote(ctx: SKRSContext2D, note: CanonicalNote, skin: NoteSkin | unde
     const isNode = note.type === 'SlideConnect' || note.type === 'Trace';
 
     if (isNode) {
-        // 长条上的连击节点(SlideConnect / Trace): 尺寸小于普通音符, 并做加亮处理便于辨认
-        // (仅影响长条节点; op101 Guide 类仍按普通单键渲染, 不受此分支影响)
+        // 长条上的连击节点(SlideConnect / Trace): 尺寸略小于普通音符, 并做加亮处理便于辨认。
+        // 宽度必须**按比例**收缩 —— 跨轨的滑条节点(如 6 轨 SlideConnection)在游戏里就是整段宽度,
+        // 早期写成 Math.min(w * 0.85, LANE_WIDTH * 1.15) 的硬上限会把它们一律钳成约 1.15 轨。
+        // 这里改成只保留下限: 单轨节点仍是 0.85 轨(与旧上限下的结果一致), 跨轨节点按实际宽度收缩。
         const h = LANE_WIDTH * 0.7;
-        const sw = Math.min(w * 0.85, LANE_WIDTH * 1.15);
+        const sw = Math.max(LANE_WIDTH * 0.6, w * 0.85);
         const sx = x + (w - sw) / 2;
         const sy = centerY - h / 2;
         // 亮色底(保持紫调) + 轻外发光

@@ -2,7 +2,7 @@ import { config } from '../../config';
 import { logger } from '../../logger';
 import { Server } from '../../types/Server';
 import { Announcement } from '../../types/Announcement';
-import { listAnnouncements } from './client';
+import { getAnnouncement, listAnnouncements } from './client';
 
 /**
  * 公告变更监视器。
@@ -34,6 +34,20 @@ function listenersFor(server: Server): Set<AnnouncementListener> {
 }
 
 /**
+ * 列表接口**不返回正文**(`Announcement.body` 只有详情接口才给), 而推送出去的是公告详情图。
+ * 所以广播前必须按 id 补一次详情请求, 否则每次推送都会画成「该公告没有正文」。
+ * 详情取不到时退回列表项 —— 宁可推一张缺正文的图, 也不要因为上游抖动而漏推。
+ */
+async function withAnnouncementBody(server: Server, listItem: Announcement): Promise<Announcement> {
+    try {
+        const detail = await getAnnouncement(server, listItem.id, { force: true });
+        return detail ? { ...listItem, ...detail } : listItem;
+    } catch {
+        return listItem;
+    }
+}
+
+/**
  * 拉一次并与基线对比。
  * @param emit 为 false 时只更新基线(用于首连建立基线, 避免把历史公告当成新增推给刚连上的客户端)
  */
@@ -48,16 +62,25 @@ export async function pollAnnouncements(server: Server, emit: boolean): Promise<
     for (const a of announcements) next.set(a.id, a.lastUpdatedAt ?? '');
 
     if (previous && emit) {
-        const subscribers = listenersFor(server);
+        const changes: AnnouncementEvent[] = [];
         for (const a of announcements) {
             const before = previous.get(a.id);
             if (before === undefined) {
-                subscribers.forEach(fn => fn({ kind: 'added', announcement: a }));
+                changes.push({ kind: 'added', announcement: a });
             } else if (before !== a.lastUpdatedAt) {
-                subscribers.forEach(fn => fn({ kind: 'updated', announcement: a }));
+                changes.push({ kind: 'updated', announcement: a });
             }
         }
         // 下架仅用于更新基线(见上), 不广播
+        if (changes.length > 0) {
+            const subscribers = listenersFor(server);
+            // 多条变更并行补正文, 避免串行等待拖慢推送
+            const filled = await Promise.all(changes.map(async c => ({
+                kind: c.kind,
+                announcement: await withAnnouncementBody(server, c.announcement)
+            } as AnnouncementEvent)));
+            for (const event of filled) subscribers.forEach(fn => fn(event));
+        }
     }
     snapshots.set(server, next);
 }

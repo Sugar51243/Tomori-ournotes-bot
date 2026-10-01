@@ -44,13 +44,18 @@ export async function listAnnouncements(server: Server, opts: { force?: boolean 
     return { announcements: parseList(res.data), stale: res.source === 'stale' };
 }
 
-/** 公告详情(含正文 HTML); 找不到返回 undefined */
-export async function getAnnouncement(server: Server, id: string): Promise<Announcement | undefined> {
+/**
+ * 公告详情(含正文 HTML); 找不到返回 undefined。
+ * @param force 变更推送(公告刚被新增/修改)传 true —— 跳过 TTL, 免得把最多 ANNOUNCEMENT_TTL_S
+ *              之前的旧正文当成新公告推出去
+ */
+export async function getAnnouncement(server: Server, id: string, opts: { force?: boolean } = {}): Promise<Announcement | undefined> {
     const res = await cachedFetch(`${base(server)}/announcements/${encodeURIComponent(id)}`, {
         key: `announcements/${server}/detail_${id}.json`,
         ttlS: config.announcementTtlS,
         allowStale: true,
-        revalidate: true
+        revalidate: true,
+        forceRefresh: opts.force
     }).catch(() => undefined);
     if (!res) return undefined;
     try {

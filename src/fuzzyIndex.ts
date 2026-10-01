@@ -1,9 +1,10 @@
 import { clientFor, versionToken } from './data/masterdata/client';
 import { regionFor } from './data/region';
 import { logger } from './logger';
-import { setFuzzyConfig, resetFuzzyConfig, FuzzySearchConfig } from './fuzzySearch';
+import { setFuzzyConfig, resetFuzzyConfig, normalizeSearchText, FuzzySearchConfig } from './fuzzySearch';
 import { diskCache } from './data/cache';
-import { Server } from './types/Server';
+import { ensureKeywordsLoaded } from './data/keywords';
+import { SERVER_LIST, Server } from './types/Server';
 import { cardTypeTextIds } from './types/Card';
 
 /**
@@ -15,8 +16,10 @@ import { cardTypeTextIds } from './types/Card';
  * v5: 索引按游戏区域分片(缓存键与内存配置都带 server)
  * v6: 新增贴纸名(stampId); 角色/团体维度复用既有的 characterId / bandId
  * v7: 新增卡片属性(cardType), 供活动按「加成属性」检索
+ * v8: 别名改为**跨区域取并集** —— 上游 jp 的 MasterText 几乎没有中文列,
+ *     只按本区域取文本会让日服索引只有日文别名, 中文查询在日服上搜不到
  */
-const FUZZY_INDEX_VERSION = 7;
+const FUZZY_INDEX_VERSION = 8;
 
 /**
  * 别名索引构建: 由本区域 masterdata 生成模糊搜索配置。
@@ -27,12 +30,27 @@ async function buildConfig(server: Server): Promise<FuzzySearchConfig> {
     const config: FuzzySearchConfig = {};
     const { store, t } = regionFor(server);
 
+    /**
+     * 一个 textId 的全部语言别名 —— **跨区域取并集**。
+     *
+     * 只问本区域是不够的: 上游 jp 的 MasterText 里实体文本几乎只有日文列
+     * (实测 1083 条 textId 完全没有中文, 其中 1082 条能在 tw 找到中文),
+     * 于是日服索引只剩日文别名, 中文用户搜不到日服曲目。
+     * 各区域指向同一实体的 textId 是同一个(歌曲/角色/卡/乐团实测 0 例外),
+     * 所以把四个区域对同一 textId 的取值并起来既安全又完整。
+     *
+     * 指定 locale 时仍走各自区域的回退链 —— 顺便并入各区域默认语言下的写法。
+     */
     const localeVariants = async (textId: string): Promise<string[]> => {
         const out = new Set<string>();
         // 故意枚举全部语种: 中文用户要能用中文名搜到只有日文文本的日服曲目
-        for (const loc of ['zh-Hans', 'zh-TW', 'ja', 'en', 'ko']) {
-            const v = await t(textId, loc);
-            if (v && v !== textId) out.add(v.toLowerCase());
+        const locales = ['zh-Hans', 'zh-TW', 'ja', 'en', 'ko'];
+        for (const source of SERVER_LIST) {
+            const resolve = source === server ? t : regionFor(source).t;
+            for (const loc of locales) {
+                const v = await resolve(textId, loc);
+                if (v && v !== textId) out.add(v.toLowerCase());
+            }
         }
         return [...out];
     };
@@ -43,7 +61,7 @@ async function buildConfig(server: Server): Promise<FuzzySearchConfig> {
         for (const name of names) {
             const lower = name.toLowerCase();
             out.add(lower);
-            const stripped = lower.replace(/[^0-9a-z一-鿿぀-ヿ가-힯]/g, '');
+            const stripped = normalizeSearchText(lower);
             if (stripped) out.add(stripped);
         }
         return [...out];
@@ -140,20 +158,26 @@ async function buildConfig(server: Server): Promise<FuzzySearchConfig> {
     return config;
 }
 
-/** 确保本区域的模糊索引已构建(版本变化时重建) */
-export async function ensureFuzzyIndex(server: Server): Promise<void> {
+/**
+ * 确保本区域的模糊索引已构建(版本变化时重建), 并把用户关键词并入。
+ * @returns 该区域索引的缓存键 —— 关键词查重需要用它判断「四区域索引是否换过代」
+ */
+export async function ensureFuzzyIndex(server: Server): Promise<string> {
     // 直接问本区域的客户端, 以它认定的版本为准(与表缓存的版本一致)
     const { dataVersion } = await clientFor(server).getDataVersion();
     // 缓存键含索引结构版本: 别名类型键发生变化时需手动 +1, 否则会命中旧结构的缓存
     const cacheKey = `fuzzy/${server}/${versionToken(dataVersion)}_v${FUZZY_INDEX_VERSION}.json`;
+    // 关键词来自数据库, 不写进上面这份磁盘缓存, 而是作为独立覆盖层合并(见 fuzzySearch.setKeywordOverlay)
+    await ensureKeywordsLoaded();
     const cached = await diskCache.read(cacheKey);
     if (cached) {
         setFuzzyConfig(server, JSON.parse(cached.data.toString('utf8')) as FuzzySearchConfig);
-        return;
+        return cacheKey;
     }
     resetFuzzyConfig(server);
     const cfg = await buildConfig(server);
     await diskCache.write(cacheKey, Buffer.from(JSON.stringify(cfg)));
     setFuzzyConfig(server, cfg);
     logger('fuzzyIndex', `[${server}] built fuzzy index for version ${dataVersion}: ${Object.keys(cfg).map(k => `${k}(${Object.keys(cfg[k]).length})`).join(', ')}`);
+    return cacheKey;
 }
