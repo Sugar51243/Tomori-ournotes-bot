@@ -164,7 +164,7 @@ npm run build && npm start
 | `/cutoffAll` | 同 `/eventRanking` | **tsugu 兼容别名**：与 `/eventRanking` 同一个 router，参数与出图完全一致。注意语义差异 —— tsugu 的 `/cutoffAll` 是「各档位分数线统计」，本服务提供的是**活动乐曲排行榜**（上游 rankd 目前没有分数线接口），别名只为客户端不改调用方式 |
 | `/searchPlayer` | `playerId`, `server` \| `mainServer`, `useEasyBG?`(忽略), `compress?` | **账号查询（单服）**：玩家档案图 —— 最爱卡面大图 + 国旗服名 + 名称/等级/应援数/经验，玩家自制的 profile card 有则附上。`playerId` 可传 number 或纯数字字符串；省略服务器时按 ID 首位推断（`2`→tw、`3`→en、`4`→kr），**JP 无前缀规则，必须显式传 `jp`**。查不到时**优先引导玩家去 `https://bdon.moe/account` 添加并验证游戏账号、再把个人主页设为「公开」**；数据源的可用范围见下方说明 |
 | `/announcements` | `server` \| `mainServer`, `id?`, `compress?` | **公告一次性查询（单服出图）**：不传 `id` 出**列表图**（分类徽章 + 标题 + 起止时间 + 横幅缩略图，港澳台/韩/国际有横幅、**日服上游没有横幅字段故退化为纯文字行**）；传 `id` 出**该条公告的详情图**（标题/分类/时间/横幅 + 正文，正文由上游的 HTML 去标签后按纯文本排版，过长自动分页） |
-| `/announcementStream/{tw\|jp\|kr\|en}` | GET | **公告推送（SSE，每服四条独立端点）**：**只在公告新增或修改时**推 `announcement`（含该条公告的详情图 base64），连接时不发快照、下架也不推 —— 需要全量列表请用上面的一次性接口。另有 `ready` 握手与 `: ping` 保活。仅在有订阅者时轮询上游 |
+| `/announcementStream/{tw\|jp\|kr\|en}` | GET | **公告推送（SSE，每服四条独立端点）**：**只在公告新增或修改时**推 `announcement`（含该条公告的详情图 base64），连接时不发快照、下架也不推 —— 需要全量列表请用上面的一次性接口。另有 `ready` 握手与 `: ping` 保活。**同一服支持任意多个客户端同时连接**：每条连接各自订阅、事件广播给全部订阅者，公告图在所有订阅者之间**只渲染一次**；仅在该服**还有订阅者**时轮询上游（最后一个客户端断开才停，断开时按 `close`/`error` 清理，不会留下空转的定时器） |
 | `/cutoffDetail` `/cutoffListOfRecentEvent` `/user` | — | **404 占位**：`错误: 服务器未启用数据库`（与 tsugu 无 DB 时一致）。`/user` 在 tsugu 是账号绑定 API，本服务不实现 |
 
 ### 渲染性能
