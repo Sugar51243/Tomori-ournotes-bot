@@ -389,7 +389,11 @@ GET /announcementStream/tw     # 四条独立端点: tw / jp / kr / en
 - **多服图的内存**：四个区域全量 master 约 4× 单区域（单区域约 7MB，`MasterText` 占大头），暂未做 LRU
 - **工程化**：无 Docker/CI，无自动化测试套件（只有 `npm run typecheck`），无 API 限流
 
-## 8. MIT 许可证
+## 8. 个人声明
+
+**本次更新后项目应该短期内不会再有大型更新，直到我人为理清项目代码及具体实现框架与逻辑为止。**
+
+## 9. MIT 许可证
 
 ```
 MIT License
