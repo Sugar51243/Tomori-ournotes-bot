@@ -14,7 +14,9 @@
 
 ## 1. 项目简介
 
-本项目是《BanG Dream! Our Notes》的后端 API 服务（项目代号 **Tomori**）：实时代理 bdon 数据源，把游戏数据渲染成图片（或返回 JSON），供机器人 / 客户端调用。功能覆盖公告、歌曲与谱面、卡片、角色、乐团、活动与榜线、卡池与抽卡模拟、账号档案、贴纸，以及交友 / 车站等社区功能；响应协议与 [tsugu 后端](https://github.com/Yamamoto-2/tsugu-bangdream-bot) 兼容。
+本项目是《BanG Dream! Our Notes》的后端 API 服务（项目代号 **Tomori**）：实时代理 bdon 数据源，把游戏数据渲染成图片（或返回 JSON），供机器人 / 客户端调用。功能覆盖公告、歌曲与谱面、卡片、角色、乐团、活动与榜线、卡池与抽卡模拟、账号档案、贴纸，以及交友 / 车站等社区功能；响应协议与 [tsugu 后端](https://github.com/Yamamoto-2/tsugu-bangdream-bot) 兼容。<br>
+<br>
+**已在官方QQ机器人(偷摸零)上线，欢迎使用**
 
 ## 2. vibe coding 声明
 
