@@ -107,6 +107,17 @@ app.use((_req, res) => {
     res.status(404).send('404 Not Found');
 });
 
+// 统一错误出口: 非法 JSON 等解析错误按「参数错误」返回(而不是 express 默认的 HTML + 堆栈),
+// 其余未捕获错误记日志后回 500, 保持与各路由一致的响应形状。
+app.use((err: Error, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+        return res.status(400).send({ status: 'failed', data: '参数错误', error: [{ msg: '请求体不是合法 JSON' }] });
+    }
+    logger('expressMainThread', `unhandled error: ${err.stack ?? err}`);
+    if (res.headersSent) return next(err);
+    res.status(500).send({ status: 'failed', data: '内部错误' });
+});
+
 // 启动前检查
 registerFonts();
 

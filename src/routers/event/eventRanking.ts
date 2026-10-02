@@ -1,6 +1,6 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { listToBase64 } from '../utils';
+import { isInteger, listToBase64 } from '../utils';
 import { isServerInput, pickServer, Server, withServer } from '../../types/Server';
 import { middleware } from '../middleware';
 import { Event } from '../../types/Event';
@@ -9,6 +9,8 @@ import { regionFor } from '../../data/region';
 import { getEventTracking, resolveDefaultEventId } from '../../data/events/client';
 import { getChallengeRanking, getMusicRanking } from '../../data/ranking/client';
 import { ChallengeRanking } from '../../types/EventRanking';
+import { searchEvents, textToFuzzyResult } from '../../search';
+import { drawEventList } from '../../view/event/eventList';
 import { drawEventRanking, EventRankingSection } from '../../view/event/eventRanking';
 
 /**
@@ -37,8 +39,8 @@ router.post(
     '/',
     [
         body('displayedServerList').optional().custom(isServerInput),
-        body('id').optional().isInt({ min: 1 }),
-        body('eventId').optional().isInt({ min: 1 }),
+        body('id').optional(),
+        body('eventId').optional(),
         body('rank').optional().isInt({ min: 1 }),
         body('compress').optional().isBoolean(),
     ],
@@ -46,7 +48,7 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { id, eventId, rank, compress } = req.body;
         try {
-            const result = await commandEventRanking(pickServer(req.body), eventId ?? id, compress, rank);
+            const result = await commandEventRanking(pickServer(req.body), { id, eventId, rank, compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -61,8 +63,29 @@ router.post(
  *   2. masterdata 的 MasterChallengeMusic(挑战演出活动; 无更新时间)
  *   3. 其它活动类型: 活动本曲(MasterEvent.musicId)的榜
  */
-export async function commandEventRanking(server: Server, eventId?: number | string, compress = false, rank?: number): Promise<Array<Buffer | string>> {
-    const wanted = eventId === undefined ? await resolveDefaultEventId(server) : parseInt(String(eventId), 10);
+export interface EventRankingQuery {
+    id?: unknown;
+    eventId?: unknown;
+    rank?: number;
+    compress?: boolean;
+}
+
+export async function commandEventRanking(server: Server, query: EventRankingQuery = {}): Promise<Array<Buffer | string>> {
+    const { rank, compress = false } = query;
+
+    // ---- 活动解析: id 传文本时走模糊搜索(命中多个出活动列表图, 与查活动同款), 否则按 id; 不传取当前活动 ----
+    const rawId = query.eventId ?? query.id;
+    let wanted: number | undefined;
+    if (rawId !== undefined && !isInteger(String(rawId))) {
+        const matches = await textToFuzzyResult(server, String(rawId));
+        if (Object.keys(matches).length === 0) return ['错误: 没有有效的关键词'];
+        const hits = await searchEvents(server, matches);
+        if (hits.length === 0) return ['没有搜索到符合条件的活动'];
+        if (hits.length > 1) return drawEventList(server, hits, compress);
+        wanted = hits[0].eventId;
+    } else {
+        wanted = rawId === undefined ? await resolveDefaultEventId(server) : parseInt(String(rawId), 10);
+    }
     if (wanted === undefined || !Number.isFinite(wanted)) {
         return ['错误: 该服务器当前没有开放的活动'];
     }

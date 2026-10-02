@@ -1,9 +1,9 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64 } from '../utils';
+import { isInteger, listToBase64, pickEntityInput, EntityInput } from '../utils';
 import { fallbackChain, isServerInput, SERVER_LIST, Server, withServer } from '../../types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult, FuzzySearchResult } from '../../fuzzySearch';
+import { isFuzzySearchResult } from '../../fuzzySearch';
 import { Event } from '../../types/Event';
 
 import { eventServerRows, firstOwnServer } from '../../data/serverInfo';
@@ -12,30 +12,32 @@ import { drawEventDetail } from '../../view/event/eventDetail';
 import { drawEventList } from '../../view/event/eventList';
 import { searchEvents, textToFuzzyResult } from '../../search';
 
+/**
+ * 查活动(单服回退)。
+ *
+ * 查询输入按统一规则解析(见 utils.pickEntityInput): `id` > `eventId` > `text` > `fuzzySearchResult`;
+ * 传一个字段即可 —— 纯数字按活动 ID 直查, 其它文本走模糊搜索(支持「进行中」等状态词与日期串)。
+ */
 const router = express.Router();
 
 router.post(
     '/',
     [
         body('displayedServerList').optional().custom(isServerInput),
+        body('id').optional(),
+        body('eventId').optional(),
         body('fuzzySearchResult').optional().custom(isFuzzySearchResult),
         body('text').optional().isString(),
         body('compress').optional().isBoolean(),
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
-        const { text, fuzzySearchResult, compress } = req.body;
-
-        if (text && fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: 'text 与 fuzzySearchResult 不能同时存在' });
+        const input = pickEntityInput(req.body, ['eventId']);
+        if (input === undefined) {
+            return res.status(422).json({ status: 'failed', data: '需要提供查询输入: id / eventId / text / fuzzySearchResult 之一' });
         }
-        if (!text && !fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: '不能同时不存在 text 与 fuzzySearchResult' });
-        }
-
         try {
-            const servers = fallbackChain(req.body);
-            const result = await commandEvent(servers, text || fuzzySearchResult, compress);
+            const result = await commandEvent(fallbackChain(req.body), { input, compress: req.body.compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -44,6 +46,11 @@ router.post(
     }
 );
 
+export interface EventQuery {
+    input: EntityInput;
+    compress?: boolean;
+}
+
 /**
  * 活动查询(单服回退)。
  *
@@ -51,7 +58,8 @@ router.post(
  * 取第一个收录该活动的服出**丰富详情图**; 链上都没有时改用**多服组合表**
  * (未收录的服显示占位, 顺带看出哪个服有), 只有四个服都没有才当作活动 ID 不存在。
  */
-export async function commandEvent(servers: Server[], input: string | FuzzySearchResult, compress: boolean): Promise<Array<Buffer | string>> {
+export async function commandEvent(servers: Server[], query: EventQuery): Promise<Array<Buffer | string>> {
+    const { input, compress = false } = query;
     if (typeof input === 'string' && isInteger(input)) {
         return drawEventForId(servers, parseInt(input, 10), compress);
     }

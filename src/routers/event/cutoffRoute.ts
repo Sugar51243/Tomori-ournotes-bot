@@ -12,7 +12,6 @@ import { loadCutoffs } from '../../data/cutoff/store';
 import { recordEventCutoffs, supportedTiers } from '../../data/cutoff/recorder';
 import { getChallengeRanking } from '../../data/ranking/client';
 import { searchEvents, textToFuzzyResult } from '../../search';
-import { isFuzzySearchResult, FuzzySearchResult } from '../../fuzzySearch';
 import { drawCutoffChart } from '../../view/event/cutoffChart';
 import { drawEventList } from '../../view/event/eventList';
 
@@ -35,16 +34,14 @@ router.post(
         body('displayedServerList').optional().custom(isServerInput),
         body('id').optional(),
         body('eventId').optional(),
-        body('text').optional().isString(),
-        body('fuzzySearchResult').optional().custom(isFuzzySearchResult),
         body('rank').optional().isInt({ min: 1 }),
         body('compress').optional().isBoolean(),
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
-        const { id, eventId, text, fuzzySearchResult, rank, compress } = req.body;
+        const { id, eventId, rank, compress } = req.body;
         try {
-            const result = await commandCutoff(req.body, { id, eventId, text, fuzzySearchResult, rank, compress });
+            const result = await commandCutoff(pickServer(req.body), { id, eventId, rank, compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -53,24 +50,19 @@ router.post(
     }
 );
 
-interface CutoffQuery {
+export interface CutoffQuery {
     id?: unknown;
     eventId?: unknown;
-    text?: string;
-    fuzzySearchResult?: FuzzySearchResult;
     rank?: number;
     compress?: boolean;
 }
 
-export async function commandCutoff(body_: unknown, query: CutoffQuery): Promise<Array<Buffer | string>> {
-    // 服务器: 单服, 只取输入的首项(单值即该服), 不允许回退
-    const server = pickServer((body_ ?? {}) as Record<string, unknown>);
-
-    // ---- 1. 活动解析: 文字走模糊搜索(命中多个出活动列表), 否则按 id ----
+/** 服务器由调用方给出: 单服, 只取输入的首项(单值即该服), 不允许回退 */
+export async function commandCutoff(server: Server, query: CutoffQuery = {}): Promise<Array<Buffer | string>> {
+    // ---- 1. 活动解析: id 传文本时走模糊搜索(命中多个出活动列表), 否则按 id ----
     const rawId = query.eventId ?? query.id;
-    const input = query.text ?? (rawId !== undefined && !isInteger(String(rawId)) ? String(rawId) : undefined);
-    if (input !== undefined || query.fuzzySearchResult) {
-        const matches = query.fuzzySearchResult ?? await textToFuzzyResult(server, input ?? '');
+    if (rawId !== undefined && !isInteger(String(rawId))) {
+        const matches = await textToFuzzyResult(server, String(rawId));
         if (Object.keys(matches).length === 0) return ['错误: 没有有效的关键词'];
         const hits = await searchEvents(server, matches);
         if (hits.length === 0) return ['没有搜索到符合条件的活动'];

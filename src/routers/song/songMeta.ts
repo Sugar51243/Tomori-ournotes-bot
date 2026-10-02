@@ -29,7 +29,7 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { compress } = req.body;
         try {
-            const result = await commandSongMeta(pickServers(req.body), compress);
+            const result = await commandSongMeta(pickServers(req.body), { compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -38,7 +38,12 @@ router.post(
     }
 );
 
-export async function commandSongMeta(servers: Server[], compress: boolean): Promise<Array<Buffer | string>> {
+export interface SongMetaQuery {
+    compress?: boolean;
+}
+
+export async function commandSongMeta(servers: Server[], query: SongMetaQuery = {}): Promise<Array<Buffer | string>> {
+    const { compress = false } = query;
     const bodyServer = servers[0];
     const data = await getMusicData();
     if (!data) return ['错误: 谱面效率数据暂不可用, 请稍后再试'];

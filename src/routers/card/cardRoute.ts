@@ -1,9 +1,9 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64 } from '../utils';
+import { isInteger, listToBase64, pickEntityInput, EntityInput } from '../utils';
 import { fallbackChain, isServerInput, SERVER_LIST, Server, withServer } from '../../types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult, FuzzySearchResult } from '../../fuzzySearch';
+import { isFuzzySearchResult } from '../../fuzzySearch';
 import { drawCardDetail } from '../../view/card/cardDetail';
 import { drawCardList } from '../../view/card/cardList';
 import { searchCards, textToFuzzyResult, isMemberCard, CardKind, AnyCard } from '../../search';
@@ -17,13 +17,23 @@ import { SupportCard } from '../../types/SupportCard';
  * 服务器输入 `displayedServerList`(单个或列表, 可缺省)只决定**主体区块**用哪个服的语言与素材:
  * 按回退链依次查询, 取第一个收录该卡的服; 图内**恒列全部四服**的对比行。
  *
+ * 查询输入按统一规则解析(见 utils.pickEntityInput): `id` > `cardId` > `text` > `fuzzySearchResult`;
+ * 纯数字按卡片 ID 直查, 其它文本走模糊搜索。
+ *
  * 三套入口:
  * - /searchCard        整合(角色卡 + 支援卡)
  * - /searchMemberCard  仅角色卡(成员卡)
  * - /searchSupportCard 仅支援卡
  * 角色卡与支援卡 ID 空间重叠, 故按 ID 查询时以入口(cardType)区分。
  */
-export async function commandCard(servers: Server[], input: string | FuzzySearchResult, compress: boolean, cardType: CardKind = 'auto'): Promise<Array<Buffer | string>> {
+export interface CardQuery {
+    input: EntityInput;
+    compress?: boolean;
+    cardType?: CardKind;
+}
+
+export async function commandCard(servers: Server[], query: CardQuery): Promise<Array<Buffer | string>> {
+    const { input, compress = false, cardType = 'auto' } = query;
     if (typeof input === 'string' && isInteger(input)) {
         const cardId = parseInt(input, 10);
         // auto: 先角色卡后支援卡; 图内恒列全部四服, 主体按回退链取首个收录该卡的服
@@ -82,6 +92,9 @@ export function createCardRouter(kind: CardKind, acceptCardType = false): expres
     const router = express.Router();
     const validators = [
         body('displayedServerList').optional().custom(isServerInput),
+        // 查询输入(任选其一或组合, 优先级见 utils.pickEntityInput)
+        body('id').optional(),
+        body('cardId').optional(),
         body('fuzzySearchResult').optional().custom(isFuzzySearchResult),
         body('text').optional().isString(),
         ...(acceptCardType ? [body('cardType').optional().isIn(['member', 'support', 'auto'])] : []),
@@ -90,17 +103,13 @@ export function createCardRouter(kind: CardKind, acceptCardType = false): expres
     ];
 
     router.post('/', validators, middleware, async (req: express.Request, res: express.Response) => {
-        const { text, fuzzySearchResult, cardType, compress } = req.body;
-        if (text && fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: 'text 与 fuzzySearchResult 不能同时存在' });
-        }
-        if (!text && !fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: '不能同时不存在 text 与 fuzzySearchResult' });
+        const input = pickEntityInput(req.body, ['cardId']);
+        if (input === undefined) {
+            return res.status(422).json({ status: 'failed', data: '需要提供查询输入: id / cardId / text / fuzzySearchResult 之一' });
         }
         try {
-            const effectiveKind: CardKind = acceptCardType ? (cardType ?? kind) : kind;
-            const servers = fallbackChain(req.body);
-            const result = await commandCard(servers, text || fuzzySearchResult, compress, effectiveKind);
+            const effectiveKind: CardKind = acceptCardType ? (req.body.cardType ?? kind) : kind;
+            const result = await commandCard(fallbackChain(req.body), { input, compress: req.body.compress, cardType: effectiveKind });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);

@@ -22,7 +22,7 @@ roomListRouter.post(
     middleware,
     async (req: express.Request, res: express.Response) => {
         try {
-            const result = await commandRoomList(req.body.roomList, req.body.compress);
+            const result = await commandRoomList({ roomList: req.body.roomList, compress: req.body.compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -56,11 +56,18 @@ function parseRoomList(input: unknown): RoomView[] | undefined {
     return rooms;
 }
 
-export async function commandRoomList(input: unknown, compress?: boolean): Promise<Array<Buffer | string>> {
+export interface RoomListQuery {
+    /** tsugu 兼容的现成房间列表; 不传 = 查本服务数据库 */
+    roomList?: unknown;
+    compress?: boolean;
+}
+
+export async function commandRoomList(query: RoomListQuery = {}): Promise<Array<Buffer | string>> {
+    const compress = !!query.compress;
     let rooms: RoomView[] | undefined;
     let expireAt: (Date | undefined)[] = [];
-    if (input !== undefined) {
-        rooms = parseRoomList(input);
+    if (query.roomList !== undefined) {
+        rooms = parseRoomList(query.roomList);
         if (!rooms) return ['错误: 车牌格式错误'];
     } else {
         const docs = await queryStations();

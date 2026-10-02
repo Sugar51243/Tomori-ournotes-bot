@@ -1,18 +1,26 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { listToBase64 } from '../utils';
-import { isServerInput, pickServers } from '../../types/Server';
+import { listToBase64, pickEntityInput, EntityInput } from '../utils';
+import { isServerInput, pickServers, Server } from '../../types/Server';
 import { middleware } from '../middleware';
 import { isFuzzySearchResult } from '../../fuzzySearch';
 import { searchSongs, textToFuzzyResult } from '../../search';
 import { drawSongRandom } from '../../view/song/songRandom';
 
+/**
+ * 随机歌曲(多服)。
+ *
+ * 查询输入按统一规则解析(见 utils.pickEntityInput): `id` > `songId` > `text` > `fuzzySearchResult`;
+ * 一个都不传时从全部歌曲里随机。文本命中多首时在命中集合里随机。
+ */
 const router = express.Router();
 
 router.post(
     '/',
     [
         body('displayedServerList').optional().custom(isServerInput),
+        body('id').optional(),
+        body('songId').optional(),
         body('text').optional().isString(),
         body('fuzzySearchResult').optional().custom(isFuzzySearchResult),
         body('useEasyBG').optional().isBoolean(),   // tsugu 兼容, 忽略
@@ -20,19 +28,11 @@ router.post(
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
-        const { text, fuzzySearchResult, compress } = req.body;
         try {
-            const servers = pickServers(req.body);
-            const server = servers[0];
-            let candidates;
-            if (fuzzySearchResult) {
-                candidates = await searchSongs(server, fuzzySearchResult);
-            } else if (text) {
-                candidates = await searchSongs(server, await textToFuzzyResult(server, text));
-            } else {
-                candidates = await searchSongs(server, {});
-            }
-            const result = await drawSongRandom(candidates, servers, compress);
+            const result = await commandSongRandom(pickServers(req.body), {
+                input: pickEntityInput(req.body, ['songId']),
+                compress: req.body.compress
+            });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -40,5 +40,24 @@ router.post(
         }
     }
 );
+
+export interface SongRandomQuery {
+    /** 不传 = 从全部歌曲随机 */
+    input?: EntityInput;
+    compress?: boolean;
+}
+
+export async function commandSongRandom(servers: Server[], query: SongRandomQuery): Promise<Array<Buffer | string>> {
+    const server = servers[0];
+    let candidates;
+    if (query.input === undefined) {
+        candidates = await searchSongs(server, {});
+    } else if (typeof query.input === 'string') {
+        candidates = await searchSongs(server, await textToFuzzyResult(server, query.input));
+    } else {
+        candidates = await searchSongs(server, query.input);
+    }
+    return drawSongRandom(candidates, servers, query.compress ?? false);
+}
 
 export { router as songRandomRouter };

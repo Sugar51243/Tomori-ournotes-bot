@@ -27,7 +27,10 @@ router.post(
     async (req: express.Request, res: express.Response) => {
         const { id, compress } = req.body;
         try {
-            const result = await commandAnnouncements(pickServer(req.body), id === undefined ? undefined : String(id), compress);
+            const result = await commandAnnouncements(pickServer(req.body), {
+                id: id === undefined ? undefined : String(id),
+                compress
+            });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -36,7 +39,14 @@ router.post(
     }
 );
 
-export async function commandAnnouncements(server: Server, id: string | undefined, compress: boolean): Promise<Array<Buffer | string>> {
+export interface AnnouncementQuery {
+    /** 公告 ID; 不传 = 出该服的公告列表图 */
+    id?: string;
+    compress?: boolean;
+}
+
+export async function commandAnnouncements(server: Server, query: AnnouncementQuery = {}): Promise<Array<Buffer | string>> {
+    const { id, compress = false } = query;
     if (id === undefined) {
         const { announcements } = await listAnnouncements(server);
         return drawAnnouncementList(server, announcements, compress);

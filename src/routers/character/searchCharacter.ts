@@ -1,9 +1,9 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64 } from '../utils';
+import { isInteger, listToBase64, pickEntityInput, EntityInput } from '../utils';
 import { fallbackChain, isServerInput, SERVER_LIST } from '../../types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult, FuzzySearchResult } from '../../fuzzySearch';
+import { isFuzzySearchResult } from '../../fuzzySearch';
 import { Character } from '../../types/Character';
 import { Server, withServer } from '../../types/Server';
 import { characterServerRows, firstOwnServer } from '../../data/serverInfo';
@@ -11,30 +11,32 @@ import { drawCharacterDetail } from '../../view/character/characterDetail';
 import { drawCharacterList } from '../../view/character/characterList';
 import { searchCharacters, textToFuzzyResult } from '../../search';
 
+/**
+ * 查角色(单服回退)。
+ *
+ * 查询输入按统一规则解析(见 utils.pickEntityInput): `id` > `characterId` > `text` > `fuzzySearchResult`;
+ * 传一个字段即可 —— 纯数字按角色 ID 直查, 其它文本走模糊搜索。
+ */
 const router = express.Router();
 
 router.post(
     '/',
     [
         body('displayedServerList').optional().custom(isServerInput),
+        body('id').optional(),
+        body('characterId').optional(),
         body('fuzzySearchResult').optional().custom(isFuzzySearchResult),
         body('text').optional().isString(),
         body('compress').optional().isBoolean(),
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
-        const { text, fuzzySearchResult, compress } = req.body;
-
-        if (text && fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: 'text 与 fuzzySearchResult 不能同时存在' });
+        const input = pickEntityInput(req.body, ['characterId']);
+        if (input === undefined) {
+            return res.status(422).json({ status: 'failed', data: '需要提供查询输入: id / characterId / text / fuzzySearchResult 之一' });
         }
-        if (!text && !fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: '不能同时不存在 text 与 fuzzySearchResult' });
-        }
-
         try {
-            const servers = fallbackChain(req.body);
-            const result = await commandCharacter(servers, text || fuzzySearchResult, compress);
+            const result = await commandCharacter(fallbackChain(req.body), { input, compress: req.body.compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -43,7 +45,13 @@ router.post(
     }
 );
 
-export async function commandCharacter(servers: Server[], input: string | FuzzySearchResult, compress: boolean): Promise<Array<Buffer | string>> {
+export interface CharacterQuery {
+    input: EntityInput;
+    compress?: boolean;
+}
+
+export async function commandCharacter(servers: Server[], query: CharacterQuery): Promise<Array<Buffer | string>> {
+    const { input, compress = false } = query;
     if (typeof input === 'string' && isInteger(input)) {
         const characterId = parseInt(input, 10);
         // 图内恒列全部四服; 主体按回退链取第一个收录该角色的服

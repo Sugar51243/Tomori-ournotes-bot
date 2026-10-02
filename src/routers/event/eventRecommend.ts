@@ -1,12 +1,14 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { listToBase64 } from '../utils';
+import { isInteger, listToBase64 } from '../utils';
 import { fallbackChain, isServerInput, Server, SERVER_LIST, withServer } from '../../types/Server';
 import { middleware } from '../middleware';
 import { Event } from '../../types/Event';
 import { Song } from '../../types/Song';
 import { storeFor } from '../../data/region';
 import { getEventTracking, resolveDefaultEventId } from '../../data/events/client';
+import { searchEvents, textToFuzzyResult } from '../../search';
+import { drawEventList } from '../../view/event/eventList';
 import { getMusicData, recommendCharts, RECOMMEND_DIFFICULTIES, OVERHEAD_MS } from '../../data/musicData/client';
 import { MusicDataScoreRank, RecommendRow } from '../../types/MusicData';
 import { drawEventRecommend, RecommendSection } from '../../view/event/eventRecommendList';
@@ -35,15 +37,15 @@ router.post(
     '/',
     [
         body('displayedServerList').optional().custom(isServerInput),
-        body('id').optional().isInt({ min: 1 }),
-        body('eventId').optional().isInt({ min: 1 }),
+        body('id').optional(),
+        body('eventId').optional(),
         body('compress').optional().isBoolean(),
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
         const { id, eventId, compress } = req.body;
         try {
-            const result = await commandEventRecommend(fallbackChain(req.body), eventId ?? id, compress);
+            const result = await commandEventRecommend(fallbackChain(req.body), { id, eventId, compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -52,17 +54,38 @@ router.post(
     }
 );
 
-export async function commandEventRecommend(servers: Server[], eventId?: number | string, compress = false): Promise<Array<Buffer | string>> {
+export interface EventRecommendQuery {
+    id?: unknown;
+    eventId?: unknown;
+    compress?: boolean;
+}
+
+export async function commandEventRecommend(servers: Server[], query: EventRecommendQuery = {}): Promise<Array<Buffer | string>> {
+    const { compress = false } = query;
+    // ---- 活动解析: id 传文本时在各服索引上依次解析(命中多个出活动列表图), 否则按 id; 不传取当前活动 ----
+    const rawId = query.eventId ?? query.id;
+    const textMode = rawId !== undefined && !isInteger(String(rawId));
     // 沿回退链取第一个有该活动(未指定 id 时为当前活动)的服
     for (const server of servers) {
-        const wanted = eventId === undefined ? await resolveDefaultEventId(server) : parseInt(String(eventId), 10);
+        let wanted: number | undefined;
+        if (textMode) {
+            const matches = await textToFuzzyResult(server, String(rawId)).catch(() => ({}));
+            if (Object.keys(matches).length === 0) continue;
+            const hits = await searchEvents(server, matches).catch(() => []);
+            if (hits.length === 0) continue;
+            if (hits.length > 1) return drawEventList(server, hits, compress);
+            wanted = hits[0].eventId;
+        } else {
+            wanted = rawId === undefined ? await resolveDefaultEventId(server) : parseInt(String(rawId), 10);
+        }
         if (wanted === undefined || !Number.isFinite(wanted)) continue;
         const event = withServer(new Event(wanted), server);
         await event.init();
         if (!event.isExist) continue;
         return renderRecommend(server, event, wanted, compress);
     }
-    return [eventId === undefined ? '错误: 该服务器当前没有开放的活动' : '错误: 该活动不存在'];
+    if (textMode) return ['没有搜索到符合条件的活动'];
+    return [rawId === undefined ? '错误: 该服务器当前没有开放的活动' : '错误: 该活动不存在'];
 }
 
 /** 在指定服上渲染该活动的推荐曲 */

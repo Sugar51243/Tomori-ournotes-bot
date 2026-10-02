@@ -80,7 +80,7 @@ friendListRouter.post(
     middleware,
     async (req: express.Request, res: express.Response) => {
         try {
-            const result = await commandFriendList(req.body.compress);
+            const result = await commandFriendList({ compress: req.body.compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -89,7 +89,11 @@ friendListRouter.post(
     }
 );
 
-export async function commandFriendList(compress?: boolean): Promise<Array<Buffer | string>> {
+export interface FriendListQuery {
+    compress?: boolean;
+}
+
+export async function commandFriendList(query: FriendListQuery = {}): Promise<Array<Buffer | string>> {
     const collection = await friendsCollection().catch(() => undefined);
     if (!collection) {
         return [DB_DISABLED];
@@ -98,5 +102,5 @@ export async function commandFriendList(compress?: boolean): Promise<Array<Buffe
     if (friends.length === 0) {
         return ['交友列表为空'];
     }
-    return drawFriendList(friends as FriendDoc[], !!compress);
+    return drawFriendList(friends as FriendDoc[], !!query.compress);
 }

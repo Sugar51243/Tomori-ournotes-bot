@@ -1,9 +1,9 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64 } from '../utils';
+import { isInteger, listToBase64, pickEntityInput, EntityInput } from '../utils';
 import { fallbackChain, isServerInput, SERVER_LIST, Server, withServer } from '../../types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult, FuzzySearchResult } from '../../fuzzySearch';
+import { isFuzzySearchResult } from '../../fuzzySearch';
 import { Band } from '../../types/Band';
 import { bandServerRows, firstOwnServer } from '../../data/serverInfo';
 import { drawBandDetail, drawBandList } from '../../view/band/bandDetail';
@@ -15,6 +15,9 @@ import { searchBands, textToFuzzyResult } from '../../search';
  * 服务器输入 `displayedServerList`(单个或列表, 可缺省)只决定**主体区块**用哪个服的语言与素材:
  * 按回退链依次查询, 取第一个收录该乐团的服; 图内**恒列全部四服**的对比行。
  * 支持数字 id、模糊搜索, 以及**自定义关键词**(关键词走 keyword/upload, 实体类型 `band`)。
+ *
+ * 查询输入按统一规则解析(见 utils.pickEntityInput): `id` > `bandId` > `text` > `fuzzySearchResult`;
+ * 传一个字段即可 —— 纯数字按乐团 ID 直查, 其它文本走模糊搜索。
  */
 const router = express.Router();
 
@@ -22,24 +25,20 @@ router.post(
     '/',
     [
         body('displayedServerList').optional().custom(isServerInput),
+        body('id').optional(),
+        body('bandId').optional(),
         body('fuzzySearchResult').optional().custom(isFuzzySearchResult),
         body('text').optional().isString(),
         body('compress').optional().isBoolean(),
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
-        const { text, fuzzySearchResult, compress } = req.body;
-
-        if (text && fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: 'text 与 fuzzySearchResult 不能同时存在' });
+        const input = pickEntityInput(req.body, ['bandId']);
+        if (input === undefined) {
+            return res.status(422).json({ status: 'failed', data: '需要提供查询输入: id / bandId / text / fuzzySearchResult 之一' });
         }
-        if (!text && !fuzzySearchResult) {
-            return res.status(422).json({ status: 'failed', data: '不能同时不存在 text 与 fuzzySearchResult' });
-        }
-
         try {
-            const servers = fallbackChain(req.body);
-            const result = await commandBand(servers, text || fuzzySearchResult, compress);
+            const result = await commandBand(fallbackChain(req.body), { input, compress: req.body.compress });
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -48,7 +47,13 @@ router.post(
     }
 );
 
-export async function commandBand(servers: Server[], input: string | FuzzySearchResult, compress: boolean): Promise<Array<Buffer | string>> {
+export interface BandQuery {
+    input: EntityInput;
+    compress?: boolean;
+}
+
+export async function commandBand(servers: Server[], query: BandQuery): Promise<Array<Buffer | string>> {
+    const { input, compress = false } = query;
     if (typeof input === 'string' && isInteger(input)) {
         const bandId = parseInt(input, 10);
         // 图内恒列全部四服; 主体按回退链取第一个收录该乐团的服
