@@ -3,13 +3,14 @@ import { config } from '../../config';
 import { Event } from '../../types/Event';
 import { Server, serverProfile } from '../../types/Server';
 import { Song } from '../../types/Song';
-import { CutoffSeries } from '../../types/Cutoff';
+import { CutoffMeta, CutoffSeries } from '../../types/Cutoff';
+import { formatGameDate } from '../../types/Gacha';
 import { cutoffPersistent } from '../../data/cutoff/store';
 import { imageBuffer, jacketUrl } from '../../data/assets';
 import { drawTitle, drawMetaBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H } from '../../components/list';
 import { drawBackground } from '../../components/background';
 import { drawServerIcon } from '../../components/serverIcon';
-import { fillTextCentered, formatDateTime, cleanText, roundedRectPath } from '../../components/draw';
+import { fillTextCentered, formatAgo, formatDateTime, cleanText, roundedRectPath } from '../../components/draw';
 import { cjkFontFamily } from '../../components/fonts';
 
 /**
@@ -24,6 +25,7 @@ import { cjkFontFamily } from '../../components/fonts';
  * **贴顶用 ▲ 标出、不渲染超出表格的部分**(`outlierFence` + `placePoints`)。
  *
  * 数据是本地按小时采样的历史(上游没有历史接口): 没启用数据库时只在内存里, 重启会遗忘, 页脚会标注。
+ * 页脚另有「上游数据更新 / Tomori 记录」一行, 说明这批数据有多新(见 freshnessLine)。
  */
 
 const WIDTH = 980;
@@ -320,13 +322,32 @@ function drawPanel(
     }
 }
 
+/**
+ * 页脚的数据新鲜度行: 上游数据什么时候抓的(解自 ETag) + Tomori 什么时候记的。
+ * 时间按**区域时区**显示(与公告图一致); 老文档缺字段时降级为"未知", 一个采样点都没有时不画这行。
+ */
+function freshnessLine(server: Server, series: CutoffSeries[], meta: CutoffMeta): string | undefined {
+    if (!series.length) return undefined;
+    const now = Date.now();
+    const stamp = (ms: number): string => `${formatGameDate(new Date(ms), server)}（${formatAgo(ms, now)}）`;
+    // 上游只给绝对时间(其时钟可能略快于本机, 标「上游时间」而不算"多久前", 免得出现负龄)
+    const upstream = meta.lastUpstreamAt
+        ? `上游数据更新 ${formatGameDate(new Date(meta.lastUpstreamAt), server)}（上游时间）`
+        : '上游更新时间未知（历史数据）';
+    const recorded = meta.lastRecordedAt
+        ? `Tomori 记录 ${stamp(meta.lastRecordedAt)}`
+        : 'Tomori 记录时间未知（历史数据）';
+    return `${upstream} · ${recorded}`;
+}
+
 export async function drawCutoffChart(
     server: Server,
     event: Event,
     series: CutoffSeries[],
     songs: Map<number, Song>,
     compress: boolean,
-    notes: string[] = []
+    notes: string[] = [],
+    meta: CutoffMeta = {}
 ): Promise<Array<Buffer | string>> {
     // 每曲一格 + 最后一格三曲同图(满宽)
     const musicIds = [...new Set(series.map(s => s.musicId))];
@@ -403,7 +424,17 @@ export async function drawCutoffChart(
         HEADER_H + MARGIN + 40,
         col === 0 ? cursorY - PANEL_GAP : cursorY + rowMaxH
     );
-    const height = contentBottom + 46 + (clippedAll.size ? 16 : 0) + notes.length * 16 + MARGIN;
+    // 页脚先成行再定画布高度: 行数决定高度, 免得新加一行被画到画布外
+    const footerLines: string[] = [];
+    const freshness = freshnessLine(server, series, meta);
+    if (freshness) footerLines.push(freshness);
+    footerLines.push(`分数 = 该档(第 N 名)在当时的出分，本地按小时采样；纵轴以 0 为基准、刻度间隔按数据自适应；数据${cutoffPersistent() ? '存于数据库' : '仅存进程内存（未启用数据库，重启会遗忘）'}`);
+    if (clippedAll.size) {
+        footerLines.push(`注：有 ${clippedAll.size} 个采样值超出图表范围（异常数据，如上游给到 int32 极限），已贴顶用 ▲ 标出、不渲染超出部分`);
+    }
+    footerLines.push(...notes);
+    // 首行基线在 contentBottom+12, 行距 16, 末尾留 18 的富余 —— 与旧公式(contentBottom+46+…)等价
+    const height = contentBottom + 12 + footerLines.length * 16 + 18 + MARGIN;
     const canvas = createCanvas(WIDTH, height);
     const ctx = canvas.getContext('2d');
 
@@ -450,16 +481,8 @@ export async function drawCutoffChart(
     ctx.fillStyle = '#8a93a0';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(
-        `分数 = 该档(第 N 名)在当时的出分，本地按小时采样；纵轴以 0 为基准、刻度间隔按数据自适应；数据${cutoffPersistent() ? '存于数据库' : '仅存进程内存（未启用数据库，重启会遗忘）'}`,
-        MARGIN, fy, WIDTH - MARGIN * 2);
-    fy += 16;
-    if (clippedAll.size) {
-        ctx.fillText(`注：有 ${clippedAll.size} 个采样值超出图表范围（异常数据，如上游给到 int32 极限），已贴顶用 ▲ 标出、不渲染超出部分`, MARGIN, fy, WIDTH - MARGIN * 2);
-        fy += 16;
-    }
-    for (const note of notes) {
-        ctx.fillText(note, MARGIN, fy, WIDTH - MARGIN * 2);
+    for (const line of footerLines) {
+        ctx.fillText(line, MARGIN, fy, WIDTH - MARGIN * 2);
         fy += 16;
     }
 

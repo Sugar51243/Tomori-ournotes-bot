@@ -17,6 +17,13 @@ export interface CutoffSample {
     /** 采样时刻(毫秒, 取整点桶) */
     bucket: number;
     score: number;
+    /** Tomori 写入这次采样的本地时刻(毫秒) */
+    recordedAt: number;
+    /**
+     * 本次采样所用上游数据的更新时间(毫秒) —— 由该曲榜响应的 ETag 解出(见 data/ranking/client.ts)。
+     * 上游没给可解析的 ETag 时为 undefined。
+     */
+    upstreamAt?: number;
 }
 
 /** 一条折线: 某曲某档的分数序列(时间升序) */
@@ -35,4 +42,16 @@ export interface CutoffDoc {
     /** 整点桶(毫秒) —— 同一小时内的多次采样只会更新同一条 */
     bucket: number;
     score: number;
+    /** Tomori 写入时刻(毫秒); 本功能上线前的老文档没有 */
+    recordedAt?: number;
+    /** 上游数据更新时间(毫秒, 解自 ETag); 未知或老文档为 undefined */
+    upstreamAt?: number;
+}
+
+/** 一个活动已记录数据的"新鲜度"元信息(出图页脚用) */
+export interface CutoffMeta {
+    /** 最近一次写入采样的本地时刻(毫秒) */
+    lastRecordedAt?: number;
+    /** 最近一次写入时上游数据的更新时间(毫秒) */
+    lastUpstreamAt?: number;
 }

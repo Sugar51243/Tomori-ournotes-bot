@@ -89,11 +89,13 @@ async function runForEvent(server: Server, eventId: number, query: CutoffQuery):
     const songs = await challengeSongs(server, eventId);
     if (!songs.length) return ['错误: 该活动没有可记录榜线的挑战曲'];
 
-    // 查询顺带采一次(同一个整点桶会覆盖, 不会把图撑密), 保证图上有最新一点
+    // 查询顺带采一次(同一个整点桶会覆盖, 不会把图撑密), 保证图上有最新一点。
+    // 采样有冷却(CUTOFF_QUERY_RECORD_MIN_INTERVAL_S), 短时间内重复查询直接复用上次结果;
+    // 失败时用上次采到的档位兜底, 免得误报"不支持该档"
     const tiers = await recordEventCutoffs(server, eventId, songs.map(s => ({ musicId: s.musicId, challengeMusicId: s.challengeMusicId })))
         .catch(() => [] as CutoffTier[]);
 
-    // 档位: 需求里的 10/100/1000/5000/10000, 但只画**数据支持**的档
+    // 档位: 需求里的 1/2/3/10/100/1000/5000/10000, 但只画**数据支持**的档
     const requested = query.rank !== undefined ? [Number(query.rank) as CutoffTier] : tiers;
     const usable = requested.filter(t => (CUTOFF_TIERS as readonly number[]).includes(t));
     const notes: string[] = [];
@@ -102,13 +104,13 @@ async function runForEvent(server: Server, eventId: number, query: CutoffQuery):
         return [`错误: 该活动不支持 ${query.rank} 档榜线, 当前可用档位: ${supported}`];
     }
 
-    const series = await loadCutoffs(server, eventId, usable.length ? usable : undefined);
+    const { series, meta } = await loadCutoffs(server, eventId, usable.length ? usable : undefined);
     if (!series.length) notes.push('本活动还没有采样点：服务刚启动或刚接入该活动，下一小时会开始累积');
 
     const songMap = new Map<number, Song>();
     for (const s of songs) songMap.set(s.musicId, s.song);
 
-    return drawCutoffChart(server, event, series, songMap, query.compress ?? false, notes);
+    return drawCutoffChart(server, event, series, songMap, query.compress ?? false, notes, meta);
 }
 
 /** 挑战曲: 曲目 id / 挑战曲 id(取榜用) + 已 init 的 Song; 上游追踪优先, 退回 masterdata */
