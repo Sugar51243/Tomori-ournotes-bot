@@ -211,3 +211,22 @@ export async function firstServerHavingCard(
     }
     return undefined;
 }
+
+/** 歌曲: 回退链上第一个收录该曲的服(主体渲染源) */
+export async function firstServerHavingSong(songId: number, servers: Server[]): Promise<Server | undefined> {
+    for (const server of servers) {
+        if (await storeFor(server).songById(songId).catch(() => undefined)) return server;
+    }
+    return undefined;
+}
+
+/**
+ * 静态实体图内**恒列全部四服**, 主体区块取回退链上第一个「自己有该数据」的服
+ * (只有它有数据时才能拿它渲染主体; 借港澳台数据的行渲染不出实体本身)。
+ */
+export function firstOwnServer(rows: ServerRow[], chain: Server[]): Server | undefined {
+    for (const server of chain) {
+        if (rows.find(r => r.server === server)?.hasOwn) return server;
+    }
+    return undefined;
+}

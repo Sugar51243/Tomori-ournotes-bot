@@ -2,6 +2,10 @@ import { Request, Response, NextFunction } from 'express';
 import { validationResult } from 'express-validator';
 import { logger } from '../logger';
 
+/**
+ * 中间件: 统一处理请求日志与参数验证
+ */
+
 export const middleware = (req: Request, res: Response, next: NextFunction) => {
     const requestTime = Date.now();
     logger('Request', `${req.ip} ${req.baseUrl}${req.path} ${JSON.stringify(req.body)}`);
