@@ -72,6 +72,12 @@ export const config = {
      * 调小只对自检有意义(几秒一个桶就能在假上游上攒出多点的折线), 生产保持默认。
      */
     cutoffBucketS: envInt('CUTOFF_BUCKET_S', 3600),
+    /**
+     * 用户查询触发的榜线采样的冷却(秒): 距上次采样不足该值就跳过采样, 直接用已有数据出图。
+     * 默认 300, 与 RANKING_TTL_S 对齐 —— 更频繁地重采拿到的还是同一份上游缓存。
+     * 定时采样不受此限制; 0 = 关闭冷却(每次查询都采)。
+     */
+    cutoffQueryRecordMinIntervalS: Math.max(0, envInt('CUTOFF_QUERY_RECORD_MIN_INTERVAL_S', 300)),
     /** 谱面效率数据(music-data.json, 站点「歌曲meta」同源); 随游戏版本更新 */
     musicDataUrl: envStr('MUSIC_DATA_URL', 'https://storage.bdon.moe/moenotes/music-data/music-data.json').replace(/\/+$/, ''),
     musicDataTtlS: envInt('MUSIC_DATA_TTL_S', 86400),

@@ -3,8 +3,9 @@
  * `/api/v1/{server}/events/current` + `/api/v1/{server}/events/{id}` +
  * `/api/v1/{server}/events/{id}/challenges/{challengeMusicId}/ranking`)。
  *
- * 每个挑战曲各自带一个「最后取数时间」, 出图的「最后更新 / 已更新多久」就取自这里
- * (排行接口本身只在响应头 X-Fetched-At 里给时间, 而磁盘缓存拿不到响应头)。
+ * 每个挑战曲各自带一个「最后取数时间」, 出图的「最后更新 / 已更新多久」就取自这里。
+ * 排行接口自身的时间在响应头 X-Fetched-At 里, 磁盘缓存拿不到响应头 —— 但它的 ETag 末段就是
+ * 该时间的 base36, 由 data/ranking/client.ts 解出(见 ChallengeRanking.fetchedAt)。
  */
 
 /** 活动内在榜的一首乐曲(上游 challengeRankings 的裁剪版) */
@@ -35,4 +36,6 @@ export interface ChallengeRanking {
     entries: import('./Ranking').RankingEntry[];
     /** 上游错误种类: not_found / challenge_not_started / challenge_ranking_disabled / challenge_not_collected / pending / upstream ... */
     errorKind?: string;
+    /** 该榜数据的上游更新时间(ms epoch, 解自响应的 ETag; 解不出时为 undefined) */
+    fetchedAt?: number;
 }
