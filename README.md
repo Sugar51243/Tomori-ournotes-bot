@@ -32,16 +32,6 @@
 
 **由于OurNotes从底层开始已经与老BangDream手游有所区别，如谱面渲染、活动榜线等功能在具体实现与端点使用意义上已经无可避免的与Tsugu有所区分。具体请按 [doc/endpoint.md](doc/endpoint.md) 的端点表进行查询。**
 
-**与 tsugu 的差异**（照 tsugu 实际实现对齐，而非其文档）：
-
-| 方面 | tsugu | 本服务 |
-| --- | --- | --- |
-| 谱面 | Bestdori GBP 格式（7 轨 / beat 计时） | Our Notes `nnnotes.live-score/1`（24 轨 / 绝对 `timeMs` / 滑条线 / fever） |
-| 车站存储 | 通过明确的BandoriStation车站实服务转接实现 | 通过本地MongoDB实现，TTL 索引自动清理 |
-| 车站查询 | `GET /station/queryAllRoom` 出 JSON，出图要客户端再把列表 POST 给 `/roomList` | 两者都支持：`/roomList` 不传入参时直接查库出图，也接受 tsugu 式 `roomList` 入参 |
-| 交友 | 无此功能 | 新增 `/friend/upload` `/friend/delete` `/friend/list` |
-| 关键词 | 无此功能 | 新增 `/keyword/upload` `/keyword/delete`，可给角色/角色卡/支援卡/歌曲/乐团挂检索别名 |
-
 ## 4. 数据来源
 
 项目数据皆源于`bdon.moe`及其子域/副网点
