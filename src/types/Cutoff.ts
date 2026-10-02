@@ -7,7 +7,7 @@
  */
 
 /** 需求里要求的档位; 实际支持哪些由数据决定(榜单只有前 100 → 1000/5000/10000 自动不适配) */
-export const CUTOFF_TIERS = [10, 100, 1000, 5000, 10000] as const;
+export const CUTOFF_TIERS = [1, 2, 3, 10, 100, 1000, 5000, 10000] as const;
 export type CutoffTier = typeof CUTOFF_TIERS[number];
 
 /** 一次采样的一个点: 某活动某曲某档在当时(整点桶)的分数 */
