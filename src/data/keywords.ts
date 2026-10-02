@@ -16,7 +16,8 @@ import { bumpRenderEpoch } from '../renderEpoch';
  * 1. **内存快照**(带 TTL): 搜索与详情图都读它, 不每次查库; 上传/删除后主动强刷。
  * 2. **模糊搜索覆盖层**: 把关键词并进 `fuzzySearch` 的别名表(见 fuzzySearch.setKeywordOverlay),
  *    磁盘索引缓存不受影响 —— 关键词来自数据库, 与 dataVersion 无关。
- * 3. **上传查重**: 同实体重复 + 与任意现有实体名/别名重合, 两者都拒绝。
+ * 3. **上传查重**: 同一关键词可挂在**同类型的多个实体**上(如两首歌共用一个别名),
+ *    但不能跨类型共用(歌曲与角色不能共用), 也不得与任何现有实体名/别名重合。
  */
 
 const DB_DISABLED = '服务器未启用数据库';
@@ -33,9 +34,11 @@ interface Snapshot {
     overlay: FuzzySearchConfig;
     /** 每实体的关键词条数(上限校验用) */
     countByEntity: Map<string, number>;
+    /** 归一化关键词 -> 已占用它的实体类型(跨类型查重: 一个关键词只允许出现在一类里) */
+    typesByNorm: Map<string, Set<KeywordEntityType>>;
 }
 
-const EMPTY: Snapshot = { byEntity: new Map(), overlay: {}, countByEntity: new Map() };
+const EMPTY: Snapshot = { byEntity: new Map(), overlay: {}, countByEntity: new Map(), typesByNorm: new Map() };
 
 let snapshot: Snapshot | undefined;
 let loadedAt = 0;
@@ -44,6 +47,7 @@ let inflight: Promise<void> | undefined;
 function buildSnapshot(docs: KeywordDoc[]): Snapshot {
     const byEntity = new Map<string, string[]>();
     const countByEntity = new Map<string, number>();
+    const typesByNorm = new Map<string, Set<KeywordEntityType>>();
     const overlay: FuzzySearchConfig = {};
     for (const doc of docs) {
         const key = entityKey(doc.entityType, doc.entityId);
@@ -51,6 +55,9 @@ function buildSnapshot(docs: KeywordDoc[]): Snapshot {
         if (list) list.push(doc.keyword);
         else byEntity.set(key, [doc.keyword]);
         countByEntity.set(key, (countByEntity.get(key) ?? 0) + 1);
+        const owners = typesByNorm.get(doc.normKeyword) ?? new Set<KeywordEntityType>();
+        owners.add(doc.entityType);
+        typesByNorm.set(doc.normKeyword, owners);
 
         // 与 fuzzyIndex 的 aliasVariants 同口径: 原形与去标点形都要进, 否则带标点的关键词匹配不上
         const forms = new Set<string>();
@@ -65,7 +72,7 @@ function buildSnapshot(docs: KeywordDoc[]): Snapshot {
         const aliases = (bucket[String(doc.entityId)] ??= []);
         for (const form of forms) if (!aliases.includes(form)) aliases.push(form);
     }
-    return { byEntity, overlay, countByEntity };
+    return { byEntity, overlay, countByEntity, typesByNorm };
 }
 
 function apply(next: Snapshot): void {
@@ -216,6 +223,12 @@ export async function addKeyword(input: {
     }
 
     await ensureKeywordsLoaded();
+    // 跨类型查重: 同一关键词只允许出现在一类实体里(同类型的多个实体可以共用)
+    const owners = snapshot?.typesByNorm.get(norm);
+    if (owners && [...owners].some(t => t !== entityType)) {
+        const what = [...owners].filter(t => t !== entityType).map(t => KEYWORD_ENTITY_LABELS[t]).join(' / ');
+        return { ok: false, reason: `该关键词已用于${what}，不能跨类型共用` };
+    }
     const key = entityKey(entityType, entityId);
     if ((snapshot?.countByEntity.get(key) ?? 0) >= MAX_KEYWORDS_PER_ENTITY) {
         return { ok: false, reason: `该条目关键词已达上限（${MAX_KEYWORDS_PER_ENTITY} 个）` };

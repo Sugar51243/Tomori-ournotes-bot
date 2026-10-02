@@ -3,10 +3,10 @@ import { config } from '../config';
 import { logger } from '../logger';
 
 /**
- * 带礼貌限流的 HTTP 客户端:
+ * 带礼貌限流的 HTTP 客户端(参数见 config/.env):
  * - 每主机并发上限 MAX_CONCURRENCY_PER_HOST
- * - 同主机请求最小间隔 100ms
- * - 网络错误/5xx 重试 3 次(1s/3s/9s 退避), 4xx 不重试
+ * - 同主机请求最小间隔 HTTP_MIN_INTERVAL_MS
+ * - 网络错误/5xx 重试 HTTP_RETRIES 次(按 HTTP_RETRY_BASE_MS 指数退避), 4xx 不重试
  */
 class Http {
     private semaphores = new Map<string, { count: number; queue: Array<() => void> }>();
@@ -34,12 +34,12 @@ class Http {
 
     private async pace(host: string): Promise<void> {
         const last = this.lastRequestAt.get(host) ?? 0;
-        const wait = last + 100 - Date.now();
+        const wait = last + config.httpMinIntervalMs - Date.now();
         if (wait > 0) await new Promise(r => setTimeout(r, wait));
         this.lastRequestAt.set(host, Date.now());
     }
 
-    async request<T>(url: string, options: AxiosRequestConfig, retries = 3): Promise<T> {
+    async request<T>(url: string, options: AxiosRequestConfig, retries = config.httpRetries): Promise<T> {
         const host = new URL(url).hostname;
         await this.acquire(host);
         try {
@@ -54,7 +54,7 @@ class Http {
                     const retryable = status === undefined || status >= 500;
                     if (!retryable || attempt >= retries) throw e;
                     attempt++;
-                    const delay = 1000 * 3 ** (attempt - 1);
+                    const delay = config.httpRetryBaseMs * 3 ** (attempt - 1);
                     logger('http', `retry(${attempt}/${retries}) ${url} after ${delay}ms: ${axios.isAxiosError(e) ? e.message : e}`);
                     await new Promise(r => setTimeout(r, delay));
                 }
@@ -65,7 +65,7 @@ class Http {
     }
 
     /** 返回 {status, headers, data} 以便做 ETag 重验证 */
-    async requestFull(url: string, options: AxiosRequestConfig = {}, retries = 3): Promise<{ status: number; headers: Record<string, string>; data: Buffer }> {
+    async requestFull(url: string, options: AxiosRequestConfig = {}, retries = config.httpRetries): Promise<{ status: number; headers: Record<string, string>; data: Buffer }> {
         const host = new URL(url).hostname;
         await this.acquire(host);
         try {
@@ -87,7 +87,7 @@ class Http {
                     const retryable = status === undefined || status >= 500;
                     if (!retryable || attempt >= retries) throw e;
                     attempt++;
-                    const delay = 1000 * 3 ** (attempt - 1);
+                    const delay = config.httpRetryBaseMs * 3 ** (attempt - 1);
                     await new Promise(r => setTimeout(r, delay));
                 }
             }

@@ -9,21 +9,31 @@ import { getAnnouncement, listAnnouncements } from './client';
  *
  * 上游**没有推送能力**, 只有 ETag/304 与 lastUpdatedAt —— 所以这里用轮询 + 本地 diff,
  * 延迟等于 ANNOUNCEMENT_POLL_S。只轮询「当前有订阅者的区域」, 没人听就不打上游。
- */
-
-/**
  * 只广播「新增」与「修改」—— 下架不推(需要完整列表的客户端走一次性接口)。
- * 下架仍会被 diff 出来用于更新基线, 只是不发事件。
  */
-export type AnnouncementEvent = { kind: 'added' | 'updated'; announcement: Announcement };
 
-export type AnnouncementListener = (event: AnnouncementEvent) => void;
+export type AnnouncementEvent = { kind: 'added' | 'updated'; announcement: Announcement }; // 广播给订阅者的事件, 只在新增或修改时触发
+export type AnnouncementListener = (event: AnnouncementEvent) => void;  // 订阅者回调, 只在新增或修改时触发
 
 /** 每个区域的基线: id -> lastUpdatedAt */
-const snapshots = new Map<Server, Map<string, string>>();
-const timers = new Map<Server, NodeJS.Timeout>();
-const listeners = new Map<Server, Set<AnnouncementListener>>();
+const snapshots = new Map<Server, Map<string, string>>();               // 每个区域的基线: id -> lastUpdatedAt
+const timers = new Map<Server, NodeJS.Timeout>();                       // 每个区域的轮询定时器, 没人听就停掉
+const listeners = new Map<Server, Set<AnnouncementListener>>();         // 每个区域的订阅者集合, 没人听就停掉轮询
 
+// 文件入口
+/** 订阅某区域的公告变更; 返回退订函数 */
+export function subscribe(server: Server, listener: AnnouncementListener): () => void {
+    const set = listenersFor(server);
+    set.add(listener);
+    startWatching(server);
+    logger('announcements', `[${server}] new subscriber, total ${set.size}`);
+    return () => {
+        set.delete(listener);
+        if (set.size === 0) stopWatching(server);
+    };
+}
+
+/** 获取某区域的订阅者集合, 不存在就新建 */
 function listenersFor(server: Server): Set<AnnouncementListener> {
     let set = listeners.get(server);
     if (!set) {
@@ -33,11 +43,7 @@ function listenersFor(server: Server): Set<AnnouncementListener> {
     return set;
 }
 
-/**
- * 列表接口**不返回正文**(`Announcement.body` 只有详情接口才给), 而推送出去的是公告详情图。
- * 所以广播前必须按 id 补一次详情请求, 否则每次推送都会画成「该公告没有正文」。
- * 详情取不到时退回列表项 —— 宁可推一张缺正文的图, 也不要因为上游抖动而漏推。
- */
+/** 获取公告详情 */
 async function withAnnouncementBody(server: Server, listItem: Announcement): Promise<Announcement> {
     try {
         const detail = await getAnnouncement(server, listItem.id, { force: true });
@@ -47,10 +53,7 @@ async function withAnnouncementBody(server: Server, listItem: Announcement): Pro
     }
 }
 
-/**
- * 拉一次并与基线对比。
- * @param emit 为 false 时只更新基线(用于首连建立基线, 避免把历史公告当成新增推给刚连上的客户端)
- */
+/** 拉一次并与基线对比。 emit 决定是否广播变更 */
 export async function pollAnnouncements(server: Server, emit: boolean): Promise<void> {
     // 必须强制刷新: 轮询间隔与缓存 TTL 同量级, 读缓存命中就永远看不到变更
     const { announcements } = await listAnnouncements(server, { force: true });
@@ -60,7 +63,7 @@ export async function pollAnnouncements(server: Server, emit: boolean): Promise<
     const previous = snapshots.get(server);
     const next = new Map<string, string>();
     for (const a of announcements) next.set(a.id, a.lastUpdatedAt ?? '');
-
+    
     if (previous && emit) {
         const changes: AnnouncementEvent[] = [];
         for (const a of announcements) {
@@ -85,18 +88,9 @@ export async function pollAnnouncements(server: Server, emit: boolean): Promise<
     snapshots.set(server, next);
 }
 
-/** 订阅某区域的公告变更; 返回退订函数 */
-export function subscribe(server: Server, listener: AnnouncementListener): () => void {
-    const set = listenersFor(server);
-    set.add(listener);
-    startWatching(server);
-    return () => {
-        set.delete(listener);
-        if (set.size === 0) stopWatching(server);
-    };
-}
-
+/** 开始监视某区域的公告变更 */
 function startWatching(server: Server): void {
+    // 已经在监视了
     if (timers.has(server)) return;
     logger('announcements', `[${server}] start polling every ${config.announcementPollS}s`);
     // 首连先静默建立基线, 之后才开始广播
@@ -111,6 +105,14 @@ function startWatching(server: Server): void {
     timer.unref?.();
     timers.set(server, timer);
 }
+
+/**
+ * 列表接口**不返回正文**(`Announcement.body` 只有详情接口才给), 而推送出去的是公告详情图。
+ * 所以广播前必须按 id 补一次详情请求, 否则每次推送都会画成「该公告没有正文」。
+ * 详情取不到时退回列表项 —— 宁可推一张缺正文的图, 也不要因为上游抖动而漏推。
+ */
+
+
 
 function stopWatching(server: Server): void {
     const timer = timers.get(server);

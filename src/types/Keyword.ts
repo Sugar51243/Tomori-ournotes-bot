@@ -1,3 +1,5 @@
+import { config } from '../config';
+
 /**
  * 用户自定义关键词: 给角色 / 角色卡 / 支援卡 / 歌曲挂一个便于检索的别名
  * (外号、简称、罗马音等官方名里没有的写法)。
@@ -41,6 +43,6 @@ export interface KeywordDoc {
 }
 
 /** 单条关键词长度上限(去首尾空白后) */
-export const MAX_KEYWORD_LENGTH = 32;
+export const MAX_KEYWORD_LENGTH = config.maxKeywordLength;
 /** 单个实体的关键词上限: 防止把模糊索引当公告板刷 */
-export const MAX_KEYWORDS_PER_ENTITY = 20;
+export const MAX_KEYWORDS_PER_ENTITY = config.maxKeywordsPerEntity;

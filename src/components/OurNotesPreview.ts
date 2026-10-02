@@ -1,4 +1,5 @@
 import { createCanvas, Image, SKRSContext2D } from '@napi-rs/canvas';
+import { config } from '../config';
 import { CanonicalChart, CanonicalNote, SlideChain } from '../types/Chart';
 import { NoteSkin, SpriteDef } from '../data/noteSkin';
 import { roundedRectPath, wrapTextLines, adaptText, formatTime } from './draw';
@@ -57,7 +58,7 @@ export function headerScaleFor(width: number): number {
  * 数值越高音符间距越大(可见时间窗越短)。此处按其语义线性映射到 2D 展开图的"每秒高度":
  * 校准为 noteSpeed=5.00 时 648 px/s(与既有默认密度一致)。
  */
-export const NOTE_SPEED_DEFAULT = 7.5;
+export const NOTE_SPEED_DEFAULT = config.noteSpeedDefault;
 export const NOTE_SPEED_MIN = 1;
 export const NOTE_SPEED_MAX = 12;
 const PX_PER_SEC_PER_SPEED = 129.6;      // 648 px/s @ noteSpeed 5.00

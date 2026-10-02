@@ -107,21 +107,40 @@ function sortAndCap<T extends { startAt?: Date; id: number }>(items: T[]): T[] {
 
 // ---------------------------------------------------------------- 卡 → 卡池/活动
 
+/**
+ * 关联 id 查询(**不截断**, 供模糊搜索使用; 详情图用的 tile 版本在下面按 MAX_RELATED 截断)。
+ */
+export async function relatedGachaIdsOfCard(server: Server, key: string): Promise<number[]> {
+    const source = await withGachaFallback(server);
+    return ((await storeFor(source).relatedIndex()).gachaIdsByCard.get(key) ?? []).slice();
+}
+
+export async function relatedEventIdsOfCard(server: Server, key: string): Promise<number[]> {
+    const source = await withEventFallback(server);
+    return ((await storeFor(source).relatedIndex()).eventIdsByCard.get(key) ?? []).slice();
+}
+
+/** 歌曲 id -> 相关活动 id(活动本曲 / 挑战曲) */
+export async function relatedEventIdsOfSong(server: Server, songId: number): Promise<number[]> {
+    const source = await withEventFallback(server);
+    return ((await storeFor(source).relatedIndex()).eventIdsByMusic.get(songId) ?? []).slice();
+}
+
 async function relatedGachasForCard(server: Server, key: string): Promise<RelatedGacha[]> {
     const source = await withGachaFallback(server);
     const store = storeFor(source);
-    const ids = (await store.relatedIndex()).gachaIdsByCard.get(key) ?? [];
+    const ids = await relatedGachaIdsOfCard(server, key);
     if (ids.length === 0) return [];
 
     const rows = await store.gachaList().catch(() => []);
+    const index = await store.relatedIndex();
     const tiles: Array<RelatedGacha & { startAt?: Date; id: number }> = [];
     for (const id of ids) {
         const row = rows.find(g => g.id === id);
         if (!row) continue;
-        const times = (await store.relatedIndex()).gachaTimes.get(id);
         tiles.push({
             ...gachaTile(source, id, await resolveName(row.nameTextId, server, source), row.bannerAssetName),
-            startAt: parseTime(times?.startAt, source),
+            startAt: parseTime(index.gachaTimes.get(id)?.startAt, source),
             id
         });
     }
@@ -130,34 +149,20 @@ async function relatedGachasForCard(server: Server, key: string): Promise<Relate
 
 async function relatedEventsForCard(server: Server, key: string): Promise<RelatedEvent[]> {
     const source = await withEventFallback(server);
-    const store = storeFor(source);
-    const ids = (await store.relatedIndex()).eventIdsByCard.get(key) ?? [];
-    if (ids.length === 0) return [];
-
-    const rows = await store.eventList().catch(() => []);
-    const times = (await store.relatedIndex()).eventTimes;
-    const tiles: Array<RelatedEvent & { startAt?: Date; id: number }> = [];
-    for (const id of ids) {
-        const row = rows.find(e => e.id === id);
-        if (!row) continue;
-        const nameId = String((row as Record<string, unknown>).nameTextId ?? '');
-        tiles.push({
-            ...eventTile(id, await resolveName(nameId, server, source), row.logoAsset),
-            startAt: parseTime(times.get(id)?.startAt, source),
-            id
-        });
-    }
-    return sortAndCap(tiles).map(({ startAt: _s, id: _i, ...tile }) => tile);
+    const ids = await relatedEventIdsOfCard(server, key);
+    return eventTiles(server, source, ids);
 }
-
-// ---------------------------------------------------------------- 歌曲 → 活动
 
 async function relatedEventsForSong(server: Server, songId: number): Promise<RelatedEvent[]> {
     const source = await withEventFallback(server);
-    const store = storeFor(source);
-    const ids = (await store.relatedIndex()).eventIdsByMusic.get(songId) ?? [];
-    if (ids.length === 0) return [];
+    const ids = await relatedEventIdsOfSong(server, songId);
+    return eventTiles(server, source, ids);
+}
 
+/** 事件 id 列表 -> 详情图用的 tile(名称按展示区域解析, 按时间倒序截断) */
+async function eventTiles(server: Server, source: Server, ids: number[]): Promise<RelatedEvent[]> {
+    if (ids.length === 0) return [];
+    const store = storeFor(source);
     const rows = await store.eventList().catch(() => []);
     const times = (await store.relatedIndex()).eventTimes;
     const tiles: Array<RelatedEvent & { startAt?: Date; id: number }> = [];
@@ -210,7 +215,8 @@ export function eventGachaRelated(
     return a0 <= b1 && b0 <= a1;
 }
 
-async function relatedGachasForEvent(server: Server, eventId: number): Promise<RelatedGacha[]> {
+/** 活动 id -> 相关卡池 id(不截断, 供搜索; 判据同 eventGachaRelated) */
+export async function relatedGachaIdsOfEvent(server: Server, eventId: number): Promise<number[]> {
     const source = await withGachaFallback(server);
     const store = storeFor(source);
     const index = await store.relatedIndex();
@@ -221,23 +227,17 @@ async function relatedGachasForEvent(server: Server, eventId: number): Promise<R
     const eventStart = parseTime(eventTime?.startAt, source);
     const eventEnd = parseTime(eventTime?.endAt, source);
 
-    const rows = await store.gachaList().catch(() => []);
-    const tiles: Array<RelatedGacha & { startAt?: Date; id: number }> = [];
-    for (const row of rows) {
+    const out: number[] = [];
+    for (const row of await store.gachaList().catch(() => [])) {
         const gachaTime = index.gachaTimes.get(row.id);
-        const gachaStart = parseTime(gachaTime?.startAt, source);
-        const gachaEnd = parseTime(gachaTime?.endAt, source);
-        if (!eventGachaRelated(eventCards, eventStart, eventEnd, index.upCardKeysByGacha.get(row.id), gachaStart, gachaEnd)) continue;
-        tiles.push({
-            ...gachaTile(source, row.id, await resolveName(row.nameTextId, server, source), row.bannerAssetName),
-            startAt: gachaStart,
-            id: row.id
-        });
+        if (!eventGachaRelated(eventCards, eventStart, eventEnd, index.upCardKeysByGacha.get(row.id), parseTime(gachaTime?.startAt, source), parseTime(gachaTime?.endAt, source))) continue;
+        out.push(row.id);
     }
-    return sortAndCap(tiles).map(({ startAt: _s, id: _i, ...tile }) => tile);
+    return out;
 }
 
-async function relatedEventsForGacha(server: Server, gachaId: number): Promise<RelatedEvent[]> {
+/** 卡池 id -> 相关活动 id(不截断, 供搜索; 判据同 eventGachaRelated) */
+export async function relatedEventIdsOfGacha(server: Server, gachaId: number): Promise<number[]> {
     const source = await withEventFallback(server);
     const store = storeFor(source);
     const index = await store.relatedIndex();
@@ -248,21 +248,39 @@ async function relatedEventsForGacha(server: Server, gachaId: number): Promise<R
     const gachaStart = parseTime(gachaTime?.startAt, source);
     const gachaEnd = parseTime(gachaTime?.endAt, source);
 
-    const rows = await store.eventList().catch(() => []);
-    const tiles: Array<RelatedEvent & { startAt?: Date; id: number }> = [];
-    for (const row of rows) {
+    const out: number[] = [];
+    for (const row of await store.eventList().catch(() => [])) {
         const eventTime = index.eventTimes.get(row.id);
-        const eventStart = parseTime(eventTime?.startAt, source);
-        const eventEnd = parseTime(eventTime?.endAt, source);
-        if (!eventGachaRelated(index.cardKeysByEvent.get(row.id), eventStart, eventEnd, upCards, gachaStart, gachaEnd)) continue;
-        const nameId = String((row as Record<string, unknown>).nameTextId ?? '');
+        if (!eventGachaRelated(index.cardKeysByEvent.get(row.id), parseTime(eventTime?.startAt, source), parseTime(eventTime?.endAt, source), upCards, gachaStart, gachaEnd)) continue;
+        out.push(row.id);
+    }
+    return out;
+}
+
+async function relatedGachasForEvent(server: Server, eventId: number): Promise<RelatedGacha[]> {
+    const source = await withGachaFallback(server);
+    const ids = await relatedGachaIdsOfEvent(server, eventId);
+    if (ids.length === 0) return [];
+
+    const store = storeFor(source);
+    const index = await store.relatedIndex();
+    const rows = await store.gachaList().catch(() => []);
+    const tiles: Array<RelatedGacha & { startAt?: Date; id: number }> = [];
+    for (const id of ids) {
+        const row = rows.find(g => g.id === id);
+        if (!row) continue;
         tiles.push({
-            ...eventTile(row.id, await resolveName(nameId, server, source), row.logoAsset),
-            startAt: eventStart,
-            id: row.id
+            ...gachaTile(source, id, await resolveName(row.nameTextId, server, source), row.bannerAssetName),
+            startAt: parseTime(index.gachaTimes.get(id)?.startAt, source),
+            id
         });
     }
     return sortAndCap(tiles).map(({ startAt: _s, id: _i, ...tile }) => tile);
+}
+
+async function relatedEventsForGacha(server: Server, gachaId: number): Promise<RelatedEvent[]> {
+    const source = await withEventFallback(server);
+    return eventTiles(server, source, await relatedEventIdsOfGacha(server, gachaId));
 }
 
 // ---------------------------------------------------------------- 对外门面

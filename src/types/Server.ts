@@ -140,54 +140,62 @@ export function serverDisplayName(value: unknown): string {
 }
 
 /**
- * 静态实体接口(歌曲/卡/角色/活动/歌表): 决定这一张图里要画哪几个服。
- * displayedServerList 按传入顺序去重 -> mainServer -> 默认全部四服。
+ * 服务器输入统一为一个字段 `displayedServerList`, **单值、列表、缺省都接受**:
+ * 传单个服(`"jp"`)等价于只含该服的列表; 按传入顺序归一化并去重。
  */
-export function pickServers(body: { displayedServerList?: unknown; mainServer?: unknown }): Server[] {
+export function normalizeServerInput(value: unknown): Server[] {
     const out: Server[] = [];
     const push = (v: unknown) => {
         const s = normalizeServer(v);
         if (s && !out.includes(s)) out.push(s);
     };
-    if (Array.isArray(body?.displayedServerList)) body.displayedServerList.forEach(push);
-    push(body?.mainServer);
-    return out.length ? out : [...SERVER_LIST];
+    if (Array.isArray(value)) value.forEach(push);
+    else push(value);
+    return out;
+}
+
+/** express-validator 用: 接受单个服、服列表或缺失 */
+export function isServerInput(value: unknown): boolean {
+    return isServer(value) || isServerList(value);
 }
 
 /**
- * 动态用户数据接口(排行榜/账号/公告): 一次只查一个服。
- * 新字段 `server` 优先, 兼容 tsugu 的 `mainServer`;都缺省时用 config.defaultServer。
+ * 多服 / 单服回退: 输入的服按顺序全部保留; 缺省时用全部四服。
+ * - 多服端点: 输入了几个服就同时使用几个服的数据
+ * - 单服回退端点: 按此顺序依次查询, 取第一个命中的服
  */
-export function pickServer(body: { server?: unknown; mainServer?: unknown; displayedServerList?: unknown }): Server {
-    const listed = Array.isArray(body?.displayedServerList) ? body.displayedServerList[0] : undefined;
-    return normalizeServer(body?.server)
-        ?? normalizeServer(body?.mainServer)
-        // 老客户端只会传 displayedServerList, 取首项作为单服的兜底
-        ?? normalizeServer(listed)
-        ?? defaultServer();
+export function pickServers(body: { displayedServerList?: unknown }): Server[] {
+    const list = normalizeServerInput(body?.displayedServerList);
+    return list.length ? list : [...SERVER_LIST];
 }
 
-// ---- 兼容旧调用点保留的导出 ----
+/**
+ * 单服: 只取输入列表的首项(传单值即该服), **不允许回退**;
+ * 缺省时用 config.defaultServer。
+ */
+export function pickServer(body: { displayedServerList?: unknown }): Server {
+    return normalizeServerInput(body?.displayedServerList)[0] ?? defaultServer();
+}
 
-export const serverList: Server[] = [...SERVER_LIST];
+/** 请求是否显式带了服务器输入(账号查询的 ID 前缀推断等用) */
+export function hasServerInput(body: { displayedServerList?: unknown }): boolean {
+    return normalizeServerInput(body?.displayedServerList).length > 0;
+}
 
-export const globalDefaultServer: Server[] = [...SERVER_LIST];
+/**
+ * 单服回退端点的完整回退链: 输入的服按顺序优先, 其后补齐其余服(四服顺序)。
+ * 缺省输入时即全部四服 —— 依次查询, 取第一个命中的服。
+ */
+export function fallbackChain(body: { displayedServerList?: unknown }): Server[] {
+    const list = normalizeServerInput(body?.displayedServerList);
+    return [...list, ...SERVER_LIST.filter(s => !list.includes(s))];
+}
 
 /** 交友登记: 四个区域都是合法游戏区域(历史上还允许 hk-tw-mo 别名) */
 export type FriendServer = Server;
 
-export const friendServerList: readonly FriendServer[] = SERVER_LIST;
-
 export function isFriendServer(value: unknown): value is FriendServer {
     return normalizeServer(value) !== undefined;
-}
-
-export function getServerByServerId(serverId: unknown): Server {
-    return normalizeServer(serverId) ?? defaultServer();
-}
-
-export function getServerByPriority(displayedServerList: unknown): Server {
-    return pickServers({ displayedServerList })[0];
 }
 
 /**

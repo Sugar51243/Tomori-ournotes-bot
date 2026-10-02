@@ -2,7 +2,7 @@ import { loadImage, SKRSContext2D } from '@napi-rs/canvas';
 import { Server } from '../types/Server';
 import { RelatedGacha, RelatedEvent } from '../data/relations';
 import { drawSectionTitle, SECTION_TITLE_H } from '../components/list';
-import { eventAssetImage } from './eventArt';
+import { eventAssetImage } from './event/eventArt';
 
 /**
  * 「相关卡池 / 相关活动」栏位: 缩图网格, **图片右下角叠一个黑底 ID 徽章**(不画名称)。
