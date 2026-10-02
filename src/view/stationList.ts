@@ -1,5 +1,5 @@
 import { createCanvas } from '@napi-rs/canvas';
-import { RoomView } from '../types/Station';
+import { RoomView, normalizeStationTime } from '../types/Station';
 import { drawTitle, outputFinalBuffer } from '../components/list';
 import { drawBackground } from '../components/background';
 import { drawAvatar } from '../components/avatar';
@@ -63,7 +63,7 @@ export async function drawStationList(rooms: RoomView[], expireAtList: (Date | u
             ctx.fillText(String(room.number), tx, y + 10, 260);
             ctx.fillStyle = '#9aa4b2';
             ctx.font = `13px ${FONT_STACK}`;
-            ctx.fillText(`${cleanText(room.userName)} 来自${room.source} · ${formatAgo(room.time, now)}`, tx, y + 40, WIDTH - tx - MARGIN - 10);
+            ctx.fillText(`${cleanText(room.userName)} 来自${room.source} · ${formatAgo(room.timeMs ?? normalizeStationTime(room.time), now)}`, tx, y + 40, WIDTH - tx - MARGIN - 10);
             ctx.fillStyle = '#CFD8E3';
             ctx.font = `14px ${FONT_STACK}`;
             const lines = wrapTextLines(ctx, cleanText(room.rawMessage), WIDTH - tx - MARGIN - 10, 2);

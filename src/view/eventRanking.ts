@@ -55,6 +55,9 @@ export interface EventRankingSection {
     stale?: boolean;
     /** 上游对该曲榜报的错误种类(见 data/ranking/client.ts), 用于空榜时说明原因 */
     errorKind?: string;
+    /** 这一段覆盖的名次区间(榜线查询时如 91~100; 默认前 10 时为 1~10) */
+    rankStart?: number;
+    rankEnd?: number;
 }
 
 /** 上游错误种类 -> 出图上的说明(与站点追踪器的文案对齐) */
@@ -63,6 +66,7 @@ function emptyReason(errorKind?: string): string {
         case 'challenge_not_started': return '该曲榜尚未开始';
         case 'challenge_ranking_disabled': return '该曲未开放排名';
         case 'challenge_not_collected': return '上游尚未采集到该曲榜';
+        case 'tier_not_collected': return '该曲榜没有到这个名次的数据（上游每曲只给前 100）';
         case 'pending': return '上游正在获取该曲榜, 请稍后再试';
         case 'not_found': return '上游没有该曲榜';
         case 'upstream': return '暂时连不上上游, 无法获取该曲榜';
@@ -76,7 +80,7 @@ function sectionHeight(rowCount: number): number {
 
 /** 单段: 标题带 -> 歌曲头 -> 表头 -> 数据行 */
 async function drawSection(ctx: SKRSContext2D, server: Server, section: EventRankingSection, index: number, total: number, y: number, now: number): Promise<number> {
-    const { song, musicId, ranking, lastFetchedAt, stale, errorKind } = section;
+    const { song, musicId, ranking, lastFetchedAt, stale, errorKind, rankStart, rankEnd } = section;
     const entries = ranking.entries.slice(0, MAX_ROWS);
 
     const title = song.musicTitle || `#${musicId}`;
@@ -112,7 +116,11 @@ async function drawSection(ctx: SKRSContext2D, server: Server, section: EventRan
 
     if (entries.length) {
         ctx.textAlign = 'right';
-        fillTextCentered(ctx, `前 ${entries.length} 名`, WIDTH - MARGIN, y + 40, 80);
+        // 标注这一段覆盖的名次: 榜线查询时是「第 91~100 名」, 默认就是「前 10 名」
+        const rangeText = rankEnd !== undefined && (rankStart ?? 1) > 1
+            ? `第 ${rankStart ?? 1}~${rankEnd} 名`
+            : `前 ${entries.length} 名`;
+        fillTextCentered(ctx, rangeText, WIDTH - MARGIN, y + 40, 110);
         ctx.textAlign = 'left';
     }
     y += SONG_HEAD_H;
@@ -176,7 +184,9 @@ export async function drawEventRanking(
     event: Event,
     sections: EventRankingSection[],
     compress: boolean,
-    notes: string[] = []
+    notes: string[] = [],
+    /** 榜线窗口: 只查某一档时给出(如 91~100), 影响标题与页脚文案 */
+    tierWindow?: { start: number; end: number }
 ): Promise<Array<Buffer | string>> {
     const shown = sections.slice(0, MAX_SECTIONS);
     const extra = sections.slice(MAX_SECTIONS);
@@ -192,7 +202,8 @@ export async function drawEventRanking(
     const ctx = canvas.getContext('2d');
     // 背景按活动相关团选(与活动详情页同款)
     await drawBackground(ctx, WIDTH, height, { server, bandId: event.backgroundBandId() });
-    drawTitle(ctx, WIDTH, '活动榜线');
+    const tierText = tierWindow && tierWindow.start > 1 ? ` · 第 ${tierWindow.start}~${tierWindow.end} 名` : '';
+    drawTitle(ctx, WIDTH, `活动歌榜${tierText}`);
 
     // 副信息带: 国旗 + 服名 + 活动 ID + 种类
     const metaMidY = drawMetaBand(ctx, WIDTH);
@@ -232,7 +243,10 @@ export async function drawEventRanking(
     ctx.fillStyle = '#8a93a0';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`数据来源：上游各曲当前排行前 ${MAX_ROWS} · 生成于 ${formatDateTime(new Date(now))}`, MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
+    const sourceText = tierWindow && tierWindow.start > 1
+        ? `第 ${tierWindow.start}~${tierWindow.end} 名`
+        : `前 ${MAX_ROWS} 名`;
+    ctx.fillText(`数据来源：上游各曲当前排行${sourceText} · 生成于 ${formatDateTime(new Date(now))}`, MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
     y += FOOTER_H;
     for (const note of footNotes) {
         // 未收录曲目的 id 可能一次列好几个, 必须限宽

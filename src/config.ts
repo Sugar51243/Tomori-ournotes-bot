@@ -60,6 +60,13 @@ export const config = {
     announcementPollS: envInt('ANNOUNCEMENT_POLL_S', 300),
     /** 歌曲排行缓存 */
     rankingTtlS: envInt('RANKING_TTL_S', 300),
+    /** 榜线(各档分数)记录间隔(秒): 每小时落一个采样点 */
+    cutoffRecordIntervalS: envInt('CUTOFF_RECORD_INTERVAL_S', 3600),
+    /**
+     * 榜线采样点的聚合粒度(秒)。同一桶内的多次采样互相覆盖, 默认 3600(整点桶)。
+     * 调小只对自检有意义(几秒一个桶就能在假上游上攒出多点的折线), 生产保持默认。
+     */
+    cutoffBucketS: envInt('CUTOFF_BUCKET_S', 3600),
     /** 谱面效率数据(music-data.json, 站点「歌曲meta」同源); 随游戏版本更新 */
     musicDataUrl: envStr('MUSIC_DATA_URL', 'https://storage.bdon.moe/moenotes/music-data/music-data.json').replace(/\/+$/, ''),
     musicDataTtlS: envInt('MUSIC_DATA_TTL_S', 86400),

@@ -3,7 +3,7 @@ import { body } from 'express-validator';
 import { middleware } from './middleware';
 import { stationsCollection } from '../data/mongo';
 import { config } from '../config';
-import { StationDoc, RoomView } from '../types/Station';
+import { StationDoc, RoomView, normalizeStationTime } from '../types/Station';
 
 /**
  * 车站(房间号共享): 字段与语义对齐 tsugu 的 /station/*
@@ -18,6 +18,10 @@ export function normalizeSource(platform: string): string {
     return ['onebot', 'red', 'chronocat', 'llonebot', 'napcat'].includes(platform.toLowerCase()) ? 'qq' : platform;
 }
 
+/**
+ * 对外结构: **只出原值** —— 前端可能自己用 time 算「多久前」, 换算单位等于改契约。
+ * timeMs 仅在服务端内部流转(出图/排序)。
+ */
 export function toRoomView(doc: StationDoc): RoomView {
     const view: RoomView = {
         number: doc.number,
@@ -29,6 +33,11 @@ export function toRoomView(doc: StationDoc): RoomView {
     };
     if (doc.avatarUrl) view.avatarUrl = doc.avatarUrl;
     return view;
+}
+
+/** 出图用的房间视图: 带上归一秒值(老数据没有 timeMs 时按量级现算) */
+export function toRoomViewForRender(doc: StationDoc): RoomView {
+    return { ...toRoomView(doc), timeMs: doc.timeMs ?? normalizeStationTime(doc.time) };
 }
 
 export const stationRouter = express.Router();
@@ -60,7 +69,9 @@ stationRouter.post(
                 source: normalizeSource(String(platform)),
                 userId,
                 userName,
+                // time 原样存(对外 JSON 与之前完全一致); timeMs 是归一秒值, 只给出图与排序用
                 time,
+                timeMs: normalizeStationTime(time),
                 expireAt: new Date(now.getTime() + config.stationTtlS * 1000)
             };
             if (avatarUrl) fields.avatarUrl = avatarUrl;
@@ -81,7 +92,8 @@ stationRouter.post(
 export async function queryStations(): Promise<StationDoc[] | undefined> {
     const collection = await stationsCollection().catch(() => undefined);
     if (!collection) return undefined;
-    return collection.find({ expireAt: { $gt: new Date() } }).sort({ time: -1 }).toArray();
+    // 排序用归一秒值(老数据没有 timeMs 时退回 time): 客户端单位不一时 time 之间不可比
+    return collection.find({ expireAt: { $gt: new Date() } }).sort({ timeMs: -1, time: -1 }).toArray();
 }
 
 async function handleQueryAllRoom(_req: express.Request, res: express.Response): Promise<void> {

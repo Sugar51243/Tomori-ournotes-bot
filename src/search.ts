@@ -6,6 +6,7 @@ import { Song } from './types/Song';
 import { Card } from './types/Card';
 import { SupportCard } from './types/SupportCard';
 import { Character } from './types/Character';
+import { Band } from './types/Band';
 import { Gacha } from './types/Gacha';
 import { Event } from './types/Event';
 
@@ -79,6 +80,22 @@ export async function searchCards(server: Server, matches: FuzzySearchResult, ki
 }
 
 /** 按模糊搜索结果过滤角色 */
+/** 按模糊搜索结果过滤乐团(名称/别名 + 自定义关键词) */
+export async function searchBands(server: Server, matches: FuzzySearchResult): Promise<Band[]> {
+    await refreshRegion(server);
+    await ensureFuzzyIndex(server);
+    const rows = await storeFor(server).bandList();
+    const bands: Band[] = [];
+    for (const row of rows) {
+        const band = withServer(new Band(row.id), server);
+        await band.init();
+        if (match(matches, band.fuzzyTarget(), [])) {
+            bands.push(band);
+        }
+    }
+    return bands;
+}
+
 export async function searchCharacters(server: Server, matches: FuzzySearchResult): Promise<Character[]> {
     await refreshRegion(server);
     await ensureFuzzyIndex(server);

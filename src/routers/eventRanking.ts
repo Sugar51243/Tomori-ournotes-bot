@@ -12,16 +12,25 @@ import { ChallengeRanking } from '../types/EventRanking';
 import { drawEventRanking, EventRankingSection } from '../view/eventRanking';
 
 /**
- * 活动榜线(活动排行榜)。
+ * 活动歌榜(活动歌曲排行榜)。
  *
  * 这是**用户动态数据**, 与「同一实体多服对比」的静态信息不同 —— 一次只查一个服,
  * 服务器由单值 `server` 指定(兼容 tsugu 的 `mainServer`); 活动 id 不传时取该服**当前开放的活动**。
  *
  * 同一 router 挂两个路径:
- * - `/eventRanking` —— 语义直白的正名
- * - `/cutoffAll`   —— tsugu 客户端的榜线接口名(补全原 404 占位)
+ * - `/eventSongRanking` —— 正名(活动歌榜)
+ * - `/eventRanking`     —— 旧路径, 保留兼容
+ *
+ * `rank` 参数(榜线): 10 / 100 / 1000 / 5000 / 10000 —— 取**到该名次为止的 10 名**画图
+ * (如 rank=100 → 第 91~100 名)。上游每曲榜固定只给前 100, 所以超出数据范围的档位
+ * **不适配**: 该曲的段里会注明「榜不足该档」, 完全不支持时返回领域错误并列出可用档位。
  */
 const router = express.Router();
+
+/** 需求里列出的档位; 实际能不能用由该曲榜的长度决定 */
+const CUTOFF_TIERS = [10, 100, 1000, 5000, 10000] as const;
+/** 每档展示的行数(往上 10 名) */
+const TIER_WINDOW = 10;
 
 router.post(
     '/',
@@ -30,13 +39,14 @@ router.post(
         body('mainServer').optional().custom(isServer),
         body('id').optional().isInt({ min: 1 }),
         body('eventId').optional().isInt({ min: 1 }),
+        body('rank').optional().isInt({ min: 1 }),
         body('compress').optional().isBoolean(),
     ],
     middleware,
     async (req: express.Request, res: express.Response) => {
-        const { id, eventId, compress } = req.body;
+        const { id, eventId, rank, compress } = req.body;
         try {
-            const result = await commandEventRanking(pickServer(req.body), eventId ?? id, compress);
+            const result = await commandEventRanking(pickServer(req.body), eventId ?? id, compress, rank);
             res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
@@ -51,11 +61,14 @@ router.post(
  *   2. masterdata 的 MasterChallengeMusic(挑战演出活动; 无更新时间)
  *   3. 其它活动类型: 活动本曲(MasterEvent.musicId)的榜
  */
-export async function commandEventRanking(server: Server, eventId?: number | string, compress = false): Promise<Array<Buffer | string>> {
+export async function commandEventRanking(server: Server, eventId?: number | string, compress = false, rank?: number): Promise<Array<Buffer | string>> {
     const wanted = eventId === undefined ? await resolveDefaultEventId(server) : parseInt(String(eventId), 10);
     if (wanted === undefined || !Number.isFinite(wanted)) {
         return ['错误: 该服务器当前没有开放的活动'];
     }
+    // 榜线档位: 不传 = 前 10(原来的行为); 传了则取「到该名次为止的 10 名」
+    const tier = rank === undefined ? 10 : Number(rank);
+    if (!Number.isFinite(tier) || tier < 1) return ['错误: 榜线档位不合法'];
 
     const event = withServer(new Event(wanted), server);
     await event.init();
@@ -100,16 +113,31 @@ export async function commandEventRanking(server: Server, eventId?: number | str
     }
     if (missing.length) notes.push(`本服未收录乐曲 ${missing.join(', ')}，已省略`);
 
-    // 挑战曲走活动内的榜(与站点活动追踪器同源); 兜底拿不到挑战曲 id 时才退回普通歌曲榜
+    // 挑战曲走活动内的榜(与站点活动追踪器同源); 兜底拿不到挑战曲 id 时才退回普通歌曲榜。
+    // 取前 `tier` 名(上游每曲最多前 100), 再截取「往上 10 名」的那一段。
     const fetched: ChallengeRanking[] = await Promise.all(sections.map(s => s.challengeMusicId !== undefined
-        ? getChallengeRanking(server, wanted, s.challengeMusicId, 10)
-        : getMusicRanking(server, s.musicId, 10).then(r => ({ entries: r.entries }))));
+        ? getChallengeRanking(server, wanted, s.challengeMusicId, tier)
+        : getMusicRanking(server, s.musicId, tier).then(r => ({ entries: r.entries }))));
+
+    // 数据支持哪些档位: 任一曲的榜长达到该档就算(需求: 数据不支持的档位就不适配)
+    const maxRank = Math.max(0, ...fetched.map(f => f.entries.length));
+    if (tier > 10 && maxRank < tier) {
+        const usable = (CUTOFF_TIERS as readonly number[]).filter(t => t <= maxRank && t <= 100);
+        return [`错误: 该活动不支持 ${tier} 档榜线${usable.length ? `，当前可用档位: ${usable.join(' / ')}` : ''}`];
+    }
+
     sections.forEach((section, i) => {
-        section.ranking = { server, musicId: section.musicId, entries: fetched[i].entries };
+        const all = fetched[i].entries;
+        section.ranking = { server, musicId: section.musicId, entries: all.slice(Math.max(0, tier - TIER_WINDOW), tier) };
         section.errorKind = fetched[i].errorKind;
+        // 该曲榜不足这个档 -> 这一段标注出来(其它曲照常画)
+        if (all.length < tier) section.errorKind = section.errorKind ?? 'tier_not_collected';
+        // 窗口固定是「到该档为止的 10 名」: 90 名开外就取不满, 空榜也照标名次区间
+        section.rankStart = Math.max(1, tier - TIER_WINDOW + 1);
+        section.rankEnd = tier;
     });
 
-    return drawEventRanking(server, event, sections, compress, notes);
+    return drawEventRanking(server, event, sections, compress, notes, { start: Math.max(1, tier - TIER_WINDOW + 1), end: tier });
 }
 
 export { router as eventRankingRouter };

@@ -3,8 +3,8 @@ import { body } from 'express-validator';
 import { listToBase64 } from './utils';
 import { middleware } from './middleware';
 import { drawStationList } from '../view/stationList';
-import { queryStations, toRoomView } from './station';
-import { RoomView } from '../types/Station';
+import { queryStations, toRoomViewForRender } from './station';
+import { RoomView, normalizeStationTime } from '../types/Station';
 
 /**
  * 车站列表图:
@@ -45,7 +45,9 @@ function parseRoomList(input: unknown): RoomView[] | undefined {
             source: typeof r.source === 'string' ? r.source : 'qq',
             userId: r.userId,
             userName: typeof r.userName === 'string' ? r.userName : '未知',
-            time: typeof r.time === 'number' ? r.time : Date.now()
+            // 原值照留(与 tsugu 一致), 归一秒值给渲染用(OneBot/tsugu 给秒, 也有给毫秒的)
+            time: typeof r.time === 'number' ? r.time : Date.now(),
+            timeMs: normalizeStationTime(r.time)
         };
         if (typeof r.avatarUrl === 'string' && r.avatarUrl) room.avatarUrl = r.avatarUrl;
         rooms.push(room);
@@ -63,7 +65,7 @@ export async function commandRoomList(input: unknown, compress?: boolean): Promi
     } else {
         const docs = await queryStations();
         if (!docs) return ['错误: 服务器未启用数据库'];
-        rooms = docs.map(toRoomView);
+        rooms = docs.map(toRoomViewForRender);
         // 剩余时间由库里的 expireAt 计算; tsugu 兼容入参没有该字段
         expireAt = docs.map(d => d.expireAt);
     }

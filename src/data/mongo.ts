@@ -4,6 +4,7 @@ import { logger } from '../logger';
 import type { FriendDoc } from '../types/Friend';
 import type { StationDoc } from '../types/Station';
 import type { KeywordDoc } from '../types/Keyword';
+import type { CutoffDoc } from '../types/Cutoff';
 
 /**
  * 社区功能(交友/车站)的 MongoDB 接入: 惰性单例 + 首次取集合时自建索引。
@@ -88,6 +89,20 @@ export async function stationsCollection(): Promise<Collection<StationDoc> | und
         { key: { number: 1 }, name: 'number_unique', unique: true }
     ]);
     return db.collection<StationDoc>('stations');
+}
+
+/**
+ * 榜线历史集合: (服务器, 活动, 曲目, 档位, 整点桶) 唯一 —— 采样是 upsert,
+ * 同一小时内查询多少次都只留一条记录。
+ */
+export async function cutoffsCollection(): Promise<Collection<CutoffDoc> | undefined> {
+    const db = await getDb();
+    if (!db) return undefined;
+    await ensureIndexes('cutoffs', [
+        { key: { server: 1, eventId: 1, bucket: 1 }, name: 'scope_bucket' },
+        { key: { server: 1, eventId: 1, musicId: 1, tier: 1, bucket: 1 }, name: 'point_unique', unique: true }
+    ]);
+    return db.collection<CutoffDoc>('cutoffs');
 }
 
 /** 关闭连接(进程退出/测试用) */

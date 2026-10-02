@@ -27,6 +27,7 @@ const CACHEABLE = new Set([
     '/searchMemberCard',
     '/searchSupportCard',
     '/searchCharacter',
+    '/searchBand',
     '/searchGacha',
     // 注意: /searchEvent 刻意不缓存 —— 活动图里有「距开始 / 距结束」倒计时, 必须每次重画;
     // 它依赖的静态数据与图片解码另走 imageFor 内存缓存。

@@ -16,43 +16,23 @@
 
 本服务是 tsugu 后端的 **Our Notes 版重写**，不是其官方分支，与 tsugu 作者无隶属关系。
 
-**沿用的部分**：端点命名与请求体字段（`displayedServerList` / `mainServer` / `compress` 等）、响应协议（`listToBase64` 图片数组、域内错误以 HTTP 200 返回 `['错误: ...']`）、模型字段命名习惯。
+**沿用的部分**：部分框架、端点命名、请求字段及响应协议。
 
-**代码层面只移植了模糊搜索分词器**（`src/fuzzySearch.ts`，源自 tsugu `backend/src/fuzzySearch.ts`，文件头有署名）；谱面解析与渲染、数据获取、出图排版均按 Our Notes 的数据结构重写。
+**由于OurNotes从底层开始已经与老BangDream手游有所区别，如谱面渲染、活动榜线等功能在具体实现与端点使用意义上已经无可避免的与Tsugu有所区分。具体请按本文件的端点表进行查询。**
 
 **与 tsugu 的差异**（照 tsugu 实际实现对齐，而非其文档）：
 
 | 方面 | tsugu | 本服务 |
 | --- | --- | --- |
 | 谱面 | Bestdori GBP 格式（7 轨 / beat 计时） | Our Notes `nnnotes.live-score/1`（24 轨 / 绝对 `timeMs` / 滑条线 / fever） |
-| 车站存储 | 进程内存，重启即丢，上限 100 条 | MongoDB（持久），TTL 索引自动清理 |
+| 车站存储 | 通过明确的BandoriStation车站实服务转接实现 | 通过本地MongoDB实现，TTL 索引自动清理 |
 | 车站查询 | `GET /station/queryAllRoom` 出 JSON，出图要客户端再把列表 POST 给 `/roomList` | 两者都支持：`/roomList` 不传入参时直接查库出图，也接受 tsugu 式 `roomList` 入参 |
-| 交友 | **无此功能**（其 `/user` 是账号绑定 API） | 新增 `/friend/upload` `/friend/delete` `/friend/list` |
+| 交友 | 无此功能 | 新增 `/friend/upload` `/friend/delete` `/friend/list` |
 | 关键词 | 无此功能 | 新增 `/keyword/upload` `/keyword/delete`，可给角色/角色卡/支援卡/歌曲挂检索别名 |
-| 外发 | 可选转发 BandoriStation（`USE_BANDORISTATION`） | 不实现（`bandoriStationToken` 接受但忽略） |
-| 空列表 | 返回字符串 `myc` | 返回 `车站列表为空` / `交友列表为空` |
 
 ## 3. 数据来源
 
-| 来源 | 内容 |
-| --- | --- |
-| `metadata.bdon.moe` | master 数据：`current_version.json`（**一份文档含全部区域**）与 Master 表（歌曲/卡片/角色/卡池/活动/贴纸），含文本本地化 |
-| `assets.bdon.moe` | 素材 CDN：卡面原图、贴纸、背景、乐团队标、谱面渲染素材；谱面 bundle 见 `chart-site/*`（**全区共享，不带区域段**） |
-| `api.bdon.moe` | rankd 游戏数据（公开只读）：游戏公告、歌曲排行、活动追踪（`/api/v1/{server}/events`），路径形如 `/api/v1/{server}/...` |
-| `bdon.moe` | 站点同源 API `/api/players/{server}/{id}`（玩家档案）与国旗图标 `/flags/{hk,jp,kr,us}.svg` |
-| 磁盘缓存 `./cache` | 上述资源的 TTL 缓存，ETag 重验证，断网时回退陈旧副本 |
-
-**区域命名三套并存，是最容易踩坑的地方**（已在 `src/types/Server.ts` 统一收口）：
-
-| 短码 | `current_version.json` 的键 | master 表路径段 | 素材区域段 | 素材语言 |
-| --- | --- | --- | --- | --- |
-| tw | `hk-tw-mo` | `tw` | tw | zh-Hans / zh-Hant / ja / en / ko |
-| jp | `jp` | `jp` | jp | **仅 ja** |
-| kr | `kr` | `kr` | kr | 同 tw |
-| en | `en` | `en` | en | 同 tw |
-
-`hk-tw-mo` **只是清单键** —— 拿它去拼 master 路径会 404。对本服务而言它是 `tw` 的**别名**（老 tsugu 客户端与历史交友记录会这么传）。
-实测确认：`assets.bdon.moe/jp/zh-Hans/...` 一律 404（jp 只有 `ja` 目录），且 jp 的 `MasterText` 中文列 9924 行里仅 60 行有值 —— 所以取图语言与取字回退链都必须按区域收窄。
+项目数据皆源于`bdon.moe`及其子域/副网点
 
 - 数据**实时代理**，本仓库**不打包任何官方素材**；素材版权归 Bushiroad / 官方所有
 - 对上游**礼貌限流**：每主机并发 4、间隔 100ms
@@ -89,9 +69,61 @@ npm run build && npm start
 
 启动后默认监听 `http://127.0.0.1:3000`，用 `GET /health` 检查（返回 master dataVersion 与运行时长）。缓存目录默认 `./cache`（已 gitignore）。
 
-**环境变量**（完整清单见 `.env.example`）：`PORT`、`META_BASE` / `ASSET_BASE` / `GAME_API_BASE` / `MOENOTES_SITE_BASE`（上游地址）、`MOENOTES_API_BASE` / `MOENOTES_API_KEY`（**可选的账号查询网关**，见第 5 节）、`CACHE_DIR`、`DEFAULT_SERVER`（缺省区域）、`DEFAULT_LOCALE` / `LOCALE_FALLBACKS`（文本语言回退链，各区域另有自己的默认语言）、各项 TTL（`MASTERDATA_TTL_S` / `VERSION_TTL_S` / `CHART_MANIFEST_TTL_S` / `CHART_ASSET_TTL_S` / `IMAGE_TTL_S` / `ANNOUNCEMENT_TTL_S` / `RANKING_TTL_S` / `PLAYER_TTL_S`）、`ANNOUNCEMENT_POLL_S` / `SSE_HEARTBEAT_S`（公告推送）、`MUSIC_DATA_URL` / `MUSIC_DATA_TTL_S`（歌曲meta 的谱面效率数据源）、`STAMPS_PER_PAGE`（贴纸列表分页）、`RENDER_CACHE_MB`（渲染结果缓存上限，默认 128MB）、`IMAGE_CACHE_MB`（已解码图片缓存上限，默认 64MB）、`MAX_CONCURRENCY_PER_HOST` / `HTTP_TIMEOUT_MS`（上游限流与超时）、`LOG_LEVEL`、`GACHA_DEFAULT_RATES`（概率兜底）、`KEYWORD_CACHE_TTL_S`（用户关键词内存快照存活时间，默认 60s）、数据库相关见第 6 节。
+### 环境变量
+**基础参数**
+| 变量名 | 参数 | 用途 |
+| --- | --- | --- |
+| `PORT` | INT | 监听端口 |
+| `CACHE_DIR` | STR | 缓存文件夹 |
+| `DEFAULT_SERVER` | tw/jp/kr/en | 缺参时的默认服务器参数 |
+| `DEFAULT_LOCALE` | STR | 文本默认语言 |
+| `LOCALE_FALLBACKS` | STR | 文本默认语言(全局回退链) |
+| `LOG_LEVEL` | STR | 日志输出等级 |
 
-**自检**：`npm run typecheck`（类型检查）；启动后用 `GET /health` 与第 5 节的端点示例验证。
+**数据来源**
+| 变量名 | 参数 | 用途 |
+| --- | --- | --- |
+| `META_BASE` | STR | 数据来源 |
+| `ASSET_BASE` | STR | 数据来源 |
+| `GAME_API_BASE` | STR | 数据来源 |
+| `MOENOTES_SITE_BASE` | STR | 数据来源 |
+| `MUSIC_DATA_URL` | STR | 谱面效率数据来源 |
+
+**TTL**
+| 变量名 | 参数 | 用途 |
+| --- | --- | --- |
+| `MASTERDATA_TTL_S` | INT | 各项 TTL |
+| `VERSION_TTL_S` | INT | 各项 TTL |
+| `CHART_MANIFEST_TTL_S` | INT | 各项 TTL |
+| `CHART_ASSET_TTL_S` | INT | 各项 TTL |
+| `IMAGE_TTL_S` | INT | 各项 TTL |
+| `ANNOUNCEMENT_TTL_S` | INT | 各项 TTL |
+| `RANKING_TTL_S` | INT | 各项 TTL |
+| `PLAYER_TTL_S` | INT | 各项 TTL |
+| `ANNOUNCEMENT_POLL_S` | INT | 各项 TTL |
+| `SSE_HEARTBEAT_S` | INT | 各项 TTL |
+| `MUSIC_DATA_TTL_S` | INT | 各项 TTL |
+| `KEYWORD_CACHE_TTL_S` | INT | 用户关键词内存快照存活时间 |
+| `HTTP_TIMEOUT_MS` | INT | 上游限流与超时 |
+
+**渲染/缓存**
+| 变量名 | 参数 | 用途 |
+| --- | --- | --- |
+| `STAMPS_PER_PAGE` | INT | 贴纸列表分页: 每张图放多少张 |
+| `RENDER_CACHE_MB` | INT | 渲染结果缓存上限 |
+| `IMAGE_CACHE_MB` | INT | 已解码图片缓存上限 |
+| `MAX_CONCURRENCY_PER_HOST` | INT | |
+
+**模拟抽卡概率**
+| 变量名 | 参数 | 用途 |
+| --- | --- | --- |
+| `GACHA_DEFAULT_RATES` | OBJ | 模拟抽卡（概率兜底） |
+
+**账号查询相关网关(自建)**
+| 变量名 | 参数 | 用途 |
+| --- | --- | --- |
+| `MOENOTES_API_BASE` | STR | 账号查询相关自建网关(可选) |
+| `MOENOTES_API_KEY` | STR | 账号查询相关自建网关(可选) |
 
 > **本服务没有任何访问鉴权**，不要直接暴露到公网；仅建议本机或内网自用。
 
@@ -107,24 +139,18 @@ npm run build && npm start
 | 参数校验失败 | 400 | `{status:'failed', data:'参数错误', error:[…字段级原因]}` |
 | 内部错误 | 500 | `{status:'failed', data:'内部错误'}` |
 
-- **服务器字段 — 按数据性质分成两类**（这是本次设计的中心原则，也决定了每个端点该传什么）：
+- **服务器字段 — 按数据性质分成两类**：
 
   | | 静态游戏数据 | 动态用户数据 |
   | --- | --- | --- |
-  | 端点 | `/searchSong` `/searchCard` `/searchCharacter` `/searchGacha` `/searchEvent` `/songMeta` `/songChart` `/songChartData` `/songRandom` `/gachaSimulate` `/fuzzySearch` `/getCardIllustration` `/getStampImage` | `/songRanking` `/eventRanking`(`/cutoffAll`) `/eventRecommend` `/searchPlayer` `/announcements` `/announcementStream/*` |
+  | 端点 | `/searchSong` `/searchCard` `/searchCharacter` `/searchBand` `/searchGacha` `/searchEvent` `/songMeta` `/songChart` `/songChartData` `/songRandom` `/gachaSimulate` `/fuzzySearch` `/getCardIllustration` `/getStampImage` | `/songRanking` `/eventSongRanking`(`/eventRanking`) `/cutoffAll` `/eventRecommend` `/searchPlayer` `/announcements` `/announcementStream/*` |
   | 字段 | `displayedServerList`（数组，**按序决定图中出现哪几个服**），`mainServer` 作兜底；不传则默认全部四服 | 单值 `server`（**兼容 tsugu 的 `mainServer`**），一次只查一个服 |
   | 出图 | **一图多服**：每个实体一个区块，区块内**每服一行**，行首是服国旗 | **单服一图** |
   | 理由 | 同一个实体（歌曲/卡/角色）在各服的差异可以并排比较 | 用户成绩、玩家档案、公告在各服是彼此独立的数据，没有可对比的共同实体 |
 
   **各服信息取数优先级：该服自己有就用自己的，没有才回退港澳台服。** 例如查一首歌时先看各服是否有这条数据 —— 韩服有就用韩服自己的数值显示那一行，没有才借港澳台的数据顶上；港澳台自己也没有（例如日服独有曲）时才显示「未收录」。这条规则对四个区域一视同仁。
 
-  港澳台/韩/国际三服在上游目前是同一份内容，所以三行看起来仍然一致；但规则是按「各服优先」而不是「一律取港澳台」，区域分叉后行为自然正确。**渲染主体的选择另有一套判据**：必须是「自己收录了该实体」的服（借来的数据渲染不出实体本身），因此日服独有曲仍然用日服渲染主体、其它服借用它的数据。
-
-  **出图语言以所选服务器为准**：港澳台 → 简体中文、日服 → 日文、韩服 → 韩文、国际服 → 英文。文本回退链把该区域自己的默认语言排在最前，缺失时才依次退到区域次级语言、`DEFAULT_LOCALE`、`ja`/`en`。只有**港澳台**按用户要求优先出**简体中文**（其上游 `traditionalChinese` 列仍作为次级回退）。素材语言同理（jp 只有 `ja` 目录，请求其他语言时回退到 `ja`）。
-
-  实测各区域 `MasterText` 的覆盖度：**tw/kr/en 五语种齐全**（上游是同一份文件），**jp 以日文为主**（9924 行里只有 60 行带中文、58 行带韩文），所以日服基本只会出日文，属上游数据所限。另外上游的 `simplifiedChinese` 列本身偶有繁体字形（如部分作词/作曲名），这属于数据现状而非回退链问题。
-
-  **详情类接口在未显式传服务器时以港澳台为主体渲染**（港澳台自己没有该实体时才回退日服）；显式传了服务器就按传入的来。
+  **出图语言以所选服务器为准**：港澳台 → 简体中文、日服 → 日文、韩服 → 韩文、国际服 → 英文。文本回退链把该区域自己的默认语言排在最前，缺失时才依次退到区域次级语言、`DEFAULT_LOCALE`、`ja`/`en`。只有**港澳台**优先出**简体中文**（其上游 `traditionalChinese` 列仍作为次级回退）。素材语言同理（jp 只有 `ja` 目录，请求其他语言时回退到 `ja`）。
 
   区域可写 `tw` / `jp` / `kr` / `en`，或别名 `hk-tw-mo`（等同 `tw`）；其余值一律 400。
   **例外**：交友的 `server` 沿用同一套取值（仅登记用）；`/friend/*`、`/station`、`/roomList` 与 tsugu 的 404 占位端点不受区域影响
@@ -136,7 +162,7 @@ npm run build && npm start
 | 端点 | 请求体 | 说明 |
 | --- | --- | --- |
 | `GET /health` | — | 服务状态、`defaultServer`、四区域各自的 dataVersion（一次请求取回全部区域）、`playerGateway` 是否已配置、运行时长 |
-| `/searchSong` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | 整数 ID → 歌曲详情图；否则模糊搜索 → 列表图（命中单首直接出详情） |
+| `/searchSong` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?`, `singleDraw?`(`detail`/`chart`), `difficultyId?`, `mirror?`, `noteSpeed?`/`speed?` | 整数 ID → 歌曲详情图；否则模糊搜索 → 列表图（**命中单首时按 `singleDraw` 出图**：默认 `detail` 出歌曲详情；`chart` 直接出该曲谱面图、难度/镜像/流速随参透传——供"查谱面"类调用方避免唯一命中时误出歌曲详情；多结果始终列表图） |
 | `/songMeta` | `displayedServerList`, `mainServer`, `compress?` | **歌曲meta · 效率排行**（算法与站点「歌曲meta」一致，数据同源）：一张图两榜 —— **击奏live 与 自由live 各自效率最高的前 15 张谱面**，难度**四难度混排**（EZ/NM/HD/EX 一起参与排行）。每行：封面 + ID + 曲名 + 乐团 ｜ 综合力/分钟 ｜ 等级 ｜ 难度 ｜ 时长（**BGM 时长**）｜ BPM ｜ Notes ｜ 出分（= 分/综合力）。效率 = 期望分/综合力 ÷ (BGM 时长 + 30 秒结算耗时)，技能按五槽位各 +100% 计（站点把百分比 ÷100 后入模型，W 本身就是「一个 +100% 技能多得的分数 ÷ 综合力」）；每行另按站点口径算出**相对**（该行效率 ÷ 榜首）与**支配/前沿**（技能 0~150% 下两轴都不差于它的谱面数），**只算不画**；击奏榜跳过「激走无法游玩」的谱面（第 4 个 Fever 游戏会出错），自由榜不受影响。数值与服务器无关（同一份谱面模拟数据），所选服只决定曲名/乐团的显示语言与封面取图区域（曲目本体优先港澳台，无则日服） |
 | `/songChart` | `songId`, `difficultyId?`(0-3，默认 3), `mirror?`, `noteSpeed?`(1.00~12.00，默认 7.50；`speed` 同义), `compress?` | **Our Notes 风格谱面预览图**（24 轨 / chord / 滑条 / fever / 金色 critical 音符，信息条置顶） |
 | `/songChartData` | `displayedServerList?`, `songId`, `difficultyId?`, `mirror?`, `format?`(`raw`/`simple`/`both`，默认 `simple`) | **谱面数据 JSON**（非 base64）：`meta` + 原始 nnnotes / 简化格式。谱面站点全区共享，区域只影响标题/难度的取数来源 |
@@ -144,6 +170,7 @@ npm run build && npm start
 | `/searchMemberCard` | 同上（`cardType` 无效） | **查角色卡**（成员卡） |
 | `/searchSupportCard` | 同上（`cardType` 无效） | **查支援卡**（留影） |
 | `/searchCharacter` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | 角色搜索 / 详情 |
+| `/searchBand` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | **查乐团（静态数据，多服一图）**：数字 id 或模糊搜索（**支持自定义关键词**，`entityType: band`）。详情图内容：乐团 **ID**、**图标**（等比缩放不拉伸）、**名称**、**应援色**（主/副色 + 色带）、**简介**、**成员**（角色头像 + ID + 名称），下方附各服信息表；命中多个乐团时出**列表图**（小图标 + ID + 名称 + 成员数 + 应援色）。曲目/角色以外的多服对比规则与其它静态接口一致 |
 | `/searchGacha` | `displayedServerList`, `gachaId`, `compress?` | 卡池详情 |
 | `/searchEvent` | `displayedServerList`, `text` \| `fuzzySearchResult`, `compress?` | **活动查询**。渲染模式**按「该服自己有没有这个活动」决定，不做任何服务器硬编码**：<br>① 只请求一个服且**该服自己有**该活动 → **丰富详情图**（定宽 1000，自上而下分块，块间用整条底色标题带 + 分隔线区分）：<br>· **顶图**：活动底图 + 活动图标叠放（与网页同款）<br>· **基础信息**：左＝活动名称、种类、开放/结束时间、总时长、状态（未开始→距开始，进行中→距结束，已结束→已结束多久）、展示结束时间；右＝活动道具（图标 + 名称 + ID）<br>· **加成对象**：成员卡 ── 分界线 ── 支援卡，各带 ID、缩图与按觉醒等级的加成区间；条件加成用小表格（条件/适用/加成）<br>· **相关曲目**：**活动新曲在前**（曲目 ID 右方跟一个「活动新曲」角标：黑框红底白字），后接该活动的挑战曲（多为复用的老歌），每项 = 封面 + 曲目 ID + 曲名；挑战演出类活动在标题右侧标出 `(挑战live)`<br>· **点数奖励**：每格 = pt + 奖励图标 + 数量，**每行 4 格**；只列含星钻 / 幸运水晶 / 奇迹水晶 / 棱晶 / 角色卡 / 支援卡的档位（全量 78 档大半是金币与经验，全画会非常长）<br>· **总奖励**：**全部**奖励的合计（含上面被筛掉的金币、经验、技能券、活动徽章等），图标 + 数量按实际宽度流式排列，放不下换行<br>· **演出报酬 / 挑战演出报酬**：分开两张表，每行 = 得分评级 + 分数门槛 + 活动点数 + 道具<br><br>· 说明：活动卡牌**暂未**画进这张图（版式按最新要求重排后未列入，且图已经偏长）；模型里有解析，需要时可直接加回；<br><br>② **按名称搜索命中多个活动 → 活动列表图**（一行一个活动：活动图标 + 活动 ID + 活动名称 + 起止时间 + 相关乐团名称；命中只有一个活动时仍出上面的丰富详情图，多服请求时同规则）；<br>③ 其余情况（多服请求，或请求的那个服自己没有）→ **多服组合表**（每服一行、行首国旗）。<br>上游活动数据由各服独立上传，「某服暂时没有」不等于活动不存在 —— 这时用组合表 + **未收录占位**呈现，顺带看出哪个服有；只有**四个服都没有**才返回「该活动不存在」。 |
 | `/gachaSimulate` | `mainServer`, `times?`(默认 10，上限 10000), `gachaId?`, `compress?` | 抽卡模拟：真实概率（MasterGachaLot 权重 → MasterGachaPrize 资源，含 UP 权重），不传 `gachaId` 取当前开放卡池，10 连保底；≤10 次逐个展示，>10 次计数汇总 |
@@ -153,45 +180,19 @@ npm run build && npm start
 | `/friend/upload` | `userId`, `userName`, `playerId`, `server`, `avatarUrl?` | **交友-登记/更新**：按 `userId`(QQ 号) upsert，一人一条；`server` 可为 `hk-tw-mo`/`jp`/`en`/`kr`（出图显示为港澳台服/日服/国际服/韩服） |
 | `/friend/delete` | `userId` | **交友-删除**（弱鉴权：自报 QQ 号即可） |
 | `/friend/list` | `compress?` | **交友列表图**：头像 + QQ 名 + QQ 号 + 游戏 ID + 服务器，每 30 人分页 |
-| `/keyword/upload` | `userId`, `entityType`(`character`/`card`/`supportCard`/`song`), `entityId`, `keyword` | **关键词-上传**：给角色/角色卡/支援卡/歌曲挂一个便于检索的别名。两道查重：同一实体上不能重复；且不得与任何现有实体名/别名重合（乐团、角色、歌曲、角色卡、支援卡、卡池、活动、属性、贴纸的全部语言别名与去标点变体）。命中即拒绝 |
+| `/keyword/upload` | `userId`, `entityType`(`character`/`card`/`supportCard`/`song`/`band`), `entityId`, `keyword` | **关键词-上传**：给角色/角色卡/支援卡/歌曲/乐团挂一个便于检索的别名。两道查重：同一实体上不能重复；且不得与任何现有实体名/别名重合（乐团、角色、歌曲、角色卡、支援卡、卡池、活动、属性、贴纸的全部语言别名与去标点变体）。命中即拒绝 |
 | `/keyword/delete` | `userId`, `entityType`, `entityId`, `keyword` | **关键词-删除**（弱鉴权：只能删自己上传的，按 `userId` 过滤） |
-| `/station/submitRoomNumber` | `number`, `rawMessage`, `platform`, `userId`, `userName`, `time`, `avatarUrl?`, `bandoriStationToken?` | **车站-上传/刷新**（字段与语义同 tsugu，同房号重复提交=刷新） |
+| `/station/submitRoomNumber` | `number`, `rawMessage`, `platform`, `userId`, `userName`, `time`, `avatarUrl?`, `bandoriStationToken?` | **车站-上传/刷新**（字段与语义同 tsugu，同房号重复提交=刷新）。`time` 秒/毫秒都接受，入参归一到毫秒 |
 | `/station/queryAllRoom` | —（GET 或 POST） | **车站-JSON 查询**：返回未过期房间列表 |
-| `/roomList` | `roomList?`, `compress?` | **车站列表图**：传 `roomList` 数组则直接渲染该批（tsugu 兼容）；不传则查本服务数据库 |
+| `/roomList` | `roomList?`, `compress?` | **车站列表图**：传 `roomList` 数组则直接渲染该批（tsugu 兼容）；不传则查本服务数据库。**时间单位两种都收**：OneBot/tsugu 生态的 `time` 是**秒**，也有客户端给毫秒 —— 入参统一按量级归一到毫秒，两种都显示成「x 秒前」 |
 | `/songRanking` | `songId`, `server` \| `mainServer`, `compress?` | **歌曲排行（单服）**：该曲前十用户的排行与出分（名次/玩家名/分数）。上游每首约 140KB，走磁盘缓存 |
-| `/eventRanking` | `id` \| `eventId?`, `server` \| `mainServer`, `compress?` | **活动榜线（单服一图）**：把该活动的**每个乐曲榜**自上而下画进一张图（挑战演出活动 = 3 首）。每段有：歌曲封面 + 歌曲 ID + 曲名 + 所属乐团 + 「最后更新时间 / 已更新多久」，以及前 10 名的**名次 / 玩家名 / 综合力 / 出分**。**取数与站点活动追踪器（`bdon.moe/events/tracker`）同源**：`/api/v1/{server}/events/current`（当前活动）、`/events/{id}`（各挑战曲的最后取数时间）、`/events/{id}/challenges/{挑战曲id}/ranking`（单曲榜）—— 注意榜取的是**活动内的挑战曲榜**，不是 `/music/{id}/ranking` 那个曲子历史最高分榜（活动曲在后者常常查不到数据）。不传活动 id 时取该服当前开放的活动（上游取不到时退回 masterdata 时间窗）；歌曲列表退回 `MasterChallengeMusic`（其主键 id 即挑战曲 id），非挑战型活动退回活动本曲的普通歌曲榜。某曲榜上游报错时画空榜并按原因说明（未开始 / 未开放排名 / 尚未采集 / 正在获取…）。背景沿用活动页的乐团分类背景图。活动不存在 → `错误: 该活动不存在`；该服没有开放活动 → `错误: 该服务器当前没有开放的活动`。上游实测只追踪**当前**活动，历史活动查不到榜线 |
-| `/eventRecommend` | `id` \| `eventId?`, `server` \| `mainServer`, `compress?` | **活动推荐曲**（算法与站点「歌曲meta」的**活动 · 评级**一致，数据同源）：**一张图三截**，三截都**只收 HD/EX** 两档难度 —— ① **击奏live**、② **自由live**，各按**目标评级 SS / S / A / B** 分四段，每段是**所需综合力最低的前 10 张谱面**（全曲池，活动挑战曲也在池内）；③ **挑战live（单独模式，只能用当前活动的挑战曲）**，单开一表放在最下方，按目标评级 SS 的所需综合力升序全列，分数口径同自由live（激走关、单人门槛）。**报酬列按场景分表**：击奏/自由只算**演出报酬**，挑战live 只算**挑战演出报酬**，互不混算。新曲还没进 music-data 时**借**游戏 masterdata 的门槛分 + 谱面站的定数/物量/BPM/时长补一行，取不到模拟数据的列显示「—」并在页脚说明。每行：封面 + ID + 曲名 + 乐团 ｜ **所需综合力** ｜ 等级 ｜ 难度 ｜ 时长（BGM）｜ BPM ｜ Notes ｜ **局/小时** ｜ 演出报酬 pt/时 · 道具/时 ｜ 挑战演出报酬 pt/时 · 道具/时。所需综合力 = 该评级门槛 ÷ 分/综合力（击奏用**满员 5 人房**的房间门槛，自由用单人门槛）；局/小时 = 3600s ÷ (BGM 时长 + 30s)；pt/时、道具/时 = 该评级报酬 × 局/小时，**两张报酬表都列**。不传活动 id 时取该服当前开放的活动（与 `/eventRanking` 同一套解析） |
-| `/cutoffAll` | 同 `/eventRanking` | **tsugu 兼容别名**：与 `/eventRanking` 同一个 router，参数与出图完全一致。注意语义差异 —— tsugu 的 `/cutoffAll` 是「各档位分数线统计」，本服务提供的是**活动乐曲排行榜**（上游 rankd 目前没有分数线接口），别名只为客户端不改调用方式 |
+| `/eventSongRanking` | `id` \| `eventId?`, `rank?`(榜线: 10/100/1000/5000/10000), `server` \| `mainServer`, `compress?` | **活动歌榜（单服一图）**：把该活动的**每个乐曲榜**自上而下画进一张图（挑战演出活动 = 3 首）。每段有：歌曲封面 + 歌曲 ID + 曲名 + 所属乐团 + 「最后更新时间 / 已更新多久」，以及前十名的**名次 / 玩家名 / 综合力 / 出分**。**榜线参数 `rank`**：传 10/100/1000/5000/10000 时改出「**到该名次为止的 10 名**」（如 `rank=100` → 第 91~100 名），段头与页脚都会标出区间；上游每曲榜固定只给前 100，**数据不支持的档位直接不适配**（如 1000/5000/10000 会返回领域错误并列出可用档位），某一曲榜不足该档时只有那一段标注原因、其余照画。**取数与站点活动追踪器（`bdon.moe/events/tracker`）同源**：`/api/v1/{server}/events/current`、`/events/{id}`、`/events/{id}/challenges/{挑战曲id}/ranking`。不传活动 id 时取该服当前开放的活动（上游取不到时退回 masterdata 时间窗）；歌曲列表退回 `MasterChallengeMusic`，非挑战型活动退回活动本曲。旧路径 `/eventRanking` 保留为同一 router 的别名 |
+| `/eventRecommend` | `id` \| `eventId?`, `server` \| `mainServer`, `compress?` | **活动推荐曲**（算法与站点「歌曲meta」的**活动 · 评级**一致，数据同源）：**一张图三截**，三截都**只收 HD/EX** 两档难度 —— ① **击奏live**、② **自由live**，各按**目标评级 SS / S / A / B** 分四段，每段是**所需综合力最低的前 10 张谱面**（全曲池，活动挑战曲也在池内）；③ **挑战live（单独模式，只能用当前活动的挑战曲）**，单开一表放在最下方，按目标评级 SS 的所需综合力升序全列，分数口径同自由live（激走关、单人门槛）。**报酬列按场景分表**：击奏/自由只算**演出报酬**，挑战live 只算**挑战演出报酬**，互不混算。新曲还没进 music-data 时**借**游戏 masterdata 的门槛分 + 谱面站的定数/物量/BPM/时长补一行，取不到模拟数据的列显示「—」并在页脚说明。每行：封面 + ID + 曲名 + 乐团 ｜ **所需综合力** ｜ 等级 ｜ 难度 ｜ 时长（BGM）｜ BPM ｜ Notes ｜ **局/小时** ｜ 演出报酬 pt/时 · 道具/时 ｜ 挑战演出报酬 pt/时 · 道具/时。所需综合力 = 该评级门槛 ÷ 分/综合力（击奏用**满员 5 人房**的房间门槛，自由用单人门槛）；局/小时 = 3600s ÷ (BGM 时长 + 30s)；pt/时、道具/时 = 该评级报酬 × 局/小时，**两张报酬表都列**。不传活动 id 时取该服当前开放的活动（与 `/eventSongRanking` 同一套解析） |
+| `/cutoffAll` | `id` \| `eventId?` \| `text?`(模糊搜索活动), `rank?`(只看某一档), `server` \| `mainServer` \| `displayedServerList`, `compress?` | **活动榜线 · 分数记录（单服一图，四格折线）**：一格一首挑战曲 + 最后一格三曲同图，共 4 格画在一张图里。每条线 = 某曲的某一档（前 10 / 前 100 …）在**整个活动时长**（横轴铺满 开启→结束）内的分数变化，同一条线四格同色；每格左上有曲目封面 + ID，格子用纯色打底保证可读。**上游没有历史接口**，数据由本服务**每小时采样**（`CUTOFF_RECORD_INTERVAL_S`，查询时也会顺带采一次，同一整点桶只留一条）自己攒：配了 MongoDB 就落库、没配就退化为进程内存（页脚会标注，重启即遗忘）。**档位同样按数据适配**（挑战曲榜只有前 100 → 实际可用 10 / 100），`rank` 参数只画其中一档。**服务器只查一个**：传多个时取第一个，失败自动回退下一个；`text` 模糊搜索命中多个活动时返回**活动列表图**（与查活动同款），命中一个就直接按该 id 出图 |
 | `/searchPlayer` | `playerId`, `server` \| `mainServer`, `useEasyBG?`(忽略), `compress?` | **账号查询（单服）**：玩家档案图 —— 最爱卡面大图 + 国旗服名 + 名称/等级/应援数/经验，玩家自制的 profile card 有则附上。`playerId` 可传 number 或纯数字字符串；省略服务器时按 ID 首位推断（`2`→tw、`3`→en、`4`→kr），**JP 无前缀规则，必须显式传 `jp`**。查不到时**优先引导玩家去 `https://bdon.moe/account` 添加并验证游戏账号、再把个人主页设为「公开」**；数据源的可用范围见下方说明 |
 | `/announcements` | `server` \| `mainServer`, `id?`, `compress?` | **公告一次性查询（单服出图）**：不传 `id` 出**列表图**（分类徽章 + 标题 + 起止时间 + 横幅缩略图，港澳台/韩/国际有横幅、**日服上游没有横幅字段故退化为纯文字行**）；传 `id` 出**该条公告的详情图**（标题/分类/时间/横幅 + 正文，正文由上游的 HTML 去标签后按纯文本排版，过长自动分页） |
 | `/announcementStream/{tw\|jp\|kr\|en}` | GET | **公告推送（SSE，每服四条独立端点）**：**只在公告新增或修改时**推 `announcement`（含该条公告的详情图 base64），连接时不发快照、下架也不推 —— 需要全量列表请用上面的一次性接口。另有 `ready` 握手与 `: ping` 保活。**同一服支持任意多个客户端同时连接**：每条连接各自订阅、事件广播给全部订阅者，公告图在所有订阅者之间**只渲染一次**；仅在该服**还有订阅者**时轮询上游（最后一个客户端断开才停，断开时按 `close`/`error` 清理，不会留下空转的定时器） |
 | `/cutoffDetail` `/cutoffListOfRecentEvent` `/user` | — | **404 占位**：`错误: 服务器未启用数据库`（与 tsugu 无 DB 时一致）。`/user` 在 tsugu 是账号绑定 API，本服务不实现 |
-
-### 渲染性能
-
-出图的耗时几乎全在**画布绘制 + PNG 编码**上 —— 实测 `songChart` 冷渲染 2.3s 里约 1.4s 是 PNG 编码，`songMeta` 1.2s 里约 0.75s。而 `@napi-rs/canvas` 这一版**没有开放 PNG 压缩级别**可调，所以走缓存：
-
-**渲染结果缓存**（`src/routers/renderCache.ts`，进程内 LRU，上限 `RENDER_CACHE_MB`）按「端点 + 请求体 + 相关区域的 dataVersion」缓存**已序列化的响应 JSON**，命中时直接回字符串，连 `JSON.stringify` 都省掉。
-
-| | 冷渲染 | 缓存命中 |
-| --- | --- | --- |
-| `songChart` | ~2265 ms | **~70 ms** |
-| `songMeta`（效率排行） | ~11s（**首次**，含 13MB music-data 下载 + 解析） | **~62 ms** |
-| `getStampImage`（列全部） | ~800 ms | **~58 ms** |
-| `searchEvent`（丰富版） | ~400 ms | **~80 ms** |
-| `searchSong` / `searchCard` / `searchCharacter`（单服） | 160~250 ms | **~55~65 ms** |
-| 同上但**多服对比** | 160~350 ms | 不缓存，仍 ~130~350 ms |
-
-- **只覆盖确定性端点**：随机类（`/songRandom`、`/gachaSimulate`）与用户数据/活动类（`/searchPlayer`、`/songRanking`、`/eventRanking`、`/eventRecommend`、`/announcements`、交友/车站）一律不进缓存
-- **多服对比图不进响应缓存**：只要这次请求会画出多个服务器（显式给多个 `displayedServerList`，或省略字段按默认四服），就每次重画 —— 免得某个服的状态变化（素材镜像跟上、数据补录）在缓存过期前一直显示旧图。单服请求仍走缓存
-- **`/searchEvent` 刻意不进响应缓存** —— 活动图里有「距开始 / 距结束」倒计时，必须每次重画；它靠下面那层图片缓存提速：稳态 **~140 ms**（首次 1~2 s，因为要一次性探明哪些区域缺素材）
-- **失效**：键里带各区域的 `dataVersion`，上游数据更新后自动不再命中
-- **进程重启后的第一个请求**不缓存（此时版本清单还没加载，拿不到失效依据），从第二个请求起生效
-- 缓存的是响应体，不是画布；信息量与不开缓存时完全一致
-
-**已解码图片缓存**（`src/data/imageCache.ts`，上限 `IMAGE_CACHE_MB`）：一次活动出图要取上百张图（横幅、图标、卡面、每个奖励条目的道具图标），其中大量重复（同一个道具图标出现在多个里程碑里），而 `imageBuffer` 每次都走磁盘缓存（stat + 读文件 + 读 etag 三次文件系统操作）再解码。实测 `Event.init()` 只有 0~1 ms、单张解码 0.5~19 ms —— 贵的是这上百次磁盘往返。这一层按 `assetCacheKey` 缓存解码结果，命中时只剩一次 Map 查找。
-
-**素材 404 不再是致命错误**：`imageBuffer` 现在任何失败都返回 `undefined`（调用方本来就都在判空），单张图缺失只影响那一块，不会把整次出图打成 500；活动视图还会按区域逐个尝试（上游各区域镜像进度不一），并记住哪个区域能取到，避免每次渲染都重试一遍 404。
 
 ### 活动查询
 
@@ -216,8 +217,6 @@ npm run build && npm start
 | 属性 | `紺碧` | 索引类型键 `cardType`（本服务为活动新增，覆盖五种属性的多语言名与去后缀名） |
 | 时间 | `进行中` / `未开始` / `已结束` / `即将结束` | **状态关键词**，由搜索层直接筛活动状态 |
 | 时间 | `2026-09-30` | 日期串与活动的开放/结束时间做子串匹配（`-` 与 `/` 等价） |
-
-**数据现状**：`MasterEvent` 目前**只有日服有数据**（1 条），tw/kr/en 都是空表 —— 对这三个服单独查活动会返回「该活动不存在」，多服查询里它们显示「未收录」。
 
 **活动种类**：主数据里**没有种类名称表**，只有一个 `eventType` 数字，站点也不显示种类。本服务暂时用活动自身的排名开关拼出种类标签（实测该活动 = `乐曲排名 · 乐曲总排名`），见 `Event.typeLabel()`。
 
@@ -333,7 +332,7 @@ GET /announcementStream/tw     # 四条独立端点: tw / jp / kr / en
 | 交友登记 | `POST /friend/upload`，一人一条（同 `userId` 覆盖），`server` 支持港澳台服/日服/国际服/韩服 |
 | 删除交友 | `POST /friend/delete`，自报 `userId` 即删 |
 | 交友列表 | `POST /friend/list`，出图，每 30 人分页 |
-| 上传关键词 | `POST /keyword/upload`，为角色/角色卡/支援卡/歌曲挂别名，上传时查重 |
+| 上传关键词 | `POST /keyword/upload`，为角色/角色卡/支援卡/歌曲/乐团挂别名，上传时查重 |
 | 删除关键词 | `POST /keyword/delete`，只能删自己上传的（按 `userId` 过滤） |
 | 上传车牌 | `POST /station/submitRoomNumber`，同房号重复提交 = 刷新有效期 |
 | 车站查询 | `GET`/`POST /station/queryAllRoom` 出 JSON；`POST /roomList` 出图 |
@@ -383,14 +382,8 @@ GET /announcementStream/tw     # 四条独立端点: tw / jp / kr / en
 
 ## 7. 未完成功能
 
-- **活动**：上游 `MasterEvent` 当前为空（游戏初期），`/searchEvent` 只能返回"无结果"
-- **分数线/账号绑定**：`/cutoffDetail`、`/cutoffListOfRecentEvent`、`/user`（tsugu 的账号绑定）未实现，统一 404 占位；`/cutoffAll` 已由 `/eventRanking` 补全（活动乐曲排行榜，非分数线统计）。**已知限制**：上游虽然给了档位表（`tiers`）与积分榜字段，但目前全部是 `available: false` / `enabled: false`（站点追踪器同样只能显示乐曲榜与奖励档位），所以各档位分数线与活动积分榜暂时画不出来。`/searchPlayer` 已实现，但默认数据源只能查到 StarMoe 已验证公开的账号（见第 5 节）
-- **BandoriStation 外发**：未实现，`bandoriStationToken` 字段接受但忽略
+- **分数线/账号绑定**：`/cutoffDetail`、`/cutoffListOfRecentEvent`、`/user`（tsugu 的账号绑定）未实现，统一 404 占位；`/cutoffAll` 已补全为**活动榜线 · 分数记录**（各档分数随时间的折线图，见接口表）。**已知限制**：档位分数取自**挑战曲榜**（上游每曲固定只给前 100，所以实际可用 10 / 100 两档；1000/5000/10000 没有数据来源，按需求不适配）；上游的**积分榜**（`pointRanking`）与档位表（`tiers`）目前全是 `enabled: false` / `available: false`，所以活动积分榜与奖励档位分数线暂时画不出来。历史需要自己攒：服务按小时采样，配 MongoDB 落库、没配就只在内存里。`/searchPlayer` 已实现，但默认数据源只能查到 StarMoe 已验证公开的账号（见第 5 节）
 - **鉴权**：本服务与社区写操作都没有鉴权，未设计用户体系
-- **抽卡模拟**：10 连保底为按游戏规则的近似；卡池无 lot 数据时退回 `GACHA_DEFAULT_RATES` 估计值兜底
-- **区域**：四个区域（tw/jp/kr/en）都已支持。**港澳台/韩/国际三服在上游目前是同一份内容**（同版本），故三服统一取港澳台的数据展示；jp 已分叉。区域间真正的差异要等上游放量
-- **公告推送**：是轮询而非真正的事件推送（上游无此能力），延迟受 `ANNOUNCEMENT_POLL_S` 限制；只推新增/修改，下架不推（客户端可定期用一次性接口对账）；进程重启后订阅者需要重连（SSE 客户端通常自带重连）
-- **公告正文**：去 HTML 标签后按纯文本排版，不还原富文本样式（表格/图片/颜色会丢失）。另有极少见的情况是正文本身全由图片/表格构成，去标签后不剩文字，此时仍会显示「（该公告没有正文）」
 - **活动 ↔ 卡池**：上游没有关联字段，是按「UP 卡重合 + 时间重叠」推断的启发式（见第 5 节），复刻池/纯道具池不会关联到活动
 - **关键词**：单实体上限 20 个、单条上限 32 字；只做查重不做审核内容，也没有跨实体的全局唯一性（同一别名挂到两个不同实体是允许的）
 - **多服图的内存**：四个区域全量 master 约 4× 单区域（单区域约 7MB，`MasterText` 占大头），暂未做 LRU

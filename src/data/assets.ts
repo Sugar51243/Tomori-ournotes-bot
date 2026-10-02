@@ -81,6 +81,11 @@ export function bandLogoUrl(server: Server, bandId: number, locale?: string): st
     return assetUrl(server, `Band/${bandId}/band_logo/band_logo.webp`, locale);
 }
 
+/** 乐团小图标(方形, 62x62): 列表格里用它, 比横版 band_logo 更合适 */
+export function bandSmallIconUrl(server: Server, bandId: number, locale?: string): string {
+    return assetUrl(server, `Band/${bandId}/band_small_Icon/band_small_Icon.webp`, locale);
+}
+
 export function gachaBannerUrl(server: Server, bannerAssetName: string, locale?: string): string {
     // bannerAssetName 形如 "Gacha/Banner/gacha_banner_00001"
     return assetUrl(server, `${bannerAssetName}/${bannerAssetName.split('/').at(-1)}.webp`, locale);

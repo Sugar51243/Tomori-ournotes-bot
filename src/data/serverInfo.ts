@@ -153,6 +153,29 @@ export async function characterServerRows(characterId: number, servers: Server[]
     return rows;
 }
 
+/** 乐团行的内容: 名称 / 成员数 / 应援色(各服文案可能不同, 所以按服取) */
+async function loadBand(server: Server, bandId: number): Promise<CellData | undefined> {
+    const store = storeFor(server);
+    const band = await store.bandById(bandId).catch(() => undefined);
+    if (!band) return undefined;
+    const members = (await store.characters().catch(() => [])).filter(c => Number(c.bandID) === bandId).length;
+    return {
+        cells: [
+            ['名称', await store.text.t(band.nameTextID)],
+            ['成员', members ? `${members} 人` : '-'],
+            ['应援色', band.mainColorCode || '-']
+        ]
+    };
+}
+
+export async function bandServerRows(bandId: number, servers: Server[]): Promise<ServerRow[]> {
+    const rows: ServerRow[] = [];
+    for (const server of servers) {
+        rows.push(toRow(server, await unified(server, s => loadBand(s, bandId))));
+    }
+    return rows;
+}
+
 async function loadEvent(server: Server, eventId: number): Promise<CellData | undefined> {
     const event = await storeFor(server).eventById(eventId).catch(() => undefined);
     if (!event) return undefined;

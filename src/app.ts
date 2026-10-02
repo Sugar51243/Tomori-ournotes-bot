@@ -29,6 +29,9 @@ import { createAnnouncementStreamRouter } from './routers/announcementStream';
 import { playerRouter } from './routers/playerRoute';
 import { eventRankingRouter } from './routers/eventRanking';
 import { eventRecommendRouter } from './routers/eventRecommend';
+import { cutoffRouter } from './routers/cutoffRoute';
+import { searchBandRouter } from './routers/searchBand';
+import { startCutoffRecorder } from './data/cutoff/recorder';
 import { gatewayConfigured } from './data/player/client';
 import { disabledRouter } from './routers/disabled';
 import { renderCacheMiddleware } from './routers/renderCache';
@@ -74,6 +77,7 @@ app.use('/searchCard', searchCardRouter);                  // 查卡(整合两�
 app.use('/searchMemberCard', searchMemberCardRouter);      // 查角色卡(仅角色卡)
 app.use('/searchSupportCard', searchSupportCardRouter);    // 查支援卡(仅支援卡)
 app.use('/searchCharacter', searchCharacterRouter);
+app.use('/searchBand', searchBandRouter);                  // 查乐团(多服一图, 静态数据)
 app.use('/searchGacha', searchGachaRouter);
 app.use('/searchEvent', searchEventRouter);
 app.use('/gachaSimulate', gachaSimulateRouter);
@@ -90,9 +94,10 @@ if (config.enableDb) {
 } else {
     logger('app', 'ENABLE_DB=false, community features (friend/station) stay disabled');
 }
-app.use('/eventRanking', eventRankingRouter);              // 活动榜线/排行榜(单服, 用户动态数据)
+app.use('/eventSongRanking', eventRankingRouter);          // 活动歌榜(单服, 用户动态数据; 带榜线 rank 参数)
+app.use('/eventRanking', eventRankingRouter);              // 旧路径, 保留兼容
 app.use('/eventRecommend', eventRecommendRouter);          // 活动推荐曲(单服, 静态数据+活动报酬)
-app.use('/cutoffAll', eventRankingRouter);                 // tsugu 兼容: 榜线接口名(补全原 404 占位)
+app.use('/cutoffAll', cutoffRouter);                       // 活动榜线(单服, 各档分数随时间变化的折线图)
 app.use('/cutoffDetail', disabledRouter());
 app.use('/cutoffListOfRecentEvent', disabledRouter());
 app.use('/user', disabledRouter());                        // tsugu 的 /user 是账号绑定 API, 本服务不实现
@@ -113,4 +118,6 @@ registerFonts();
 
 app.listen(config.port, () => {
     logger('expressMainThread', `listening on port ${config.port} (defaultServer=${config.defaultServer}, servers=${SERVER_LIST.join('/')})`);
+    // 榜线历史常驻采样(上游没有历史接口, 得自己按小时攒)
+    startCutoffRecorder();
 });
