@@ -90,7 +90,13 @@ export class SupportCard {
             characterName: this.characterNames,
             // 兼按角色/乐团分类命中(留影可关联多个角色)
             characterId: this.characterIds,
-            bandId: this.bandId
+            bandId: this.bandId,
+            // 卡片属性(索引把「绯红/绀碧/…」解析成 cardType 的 1..5, 与成员卡同一套编号)
+            cardType: this.cardType,
+            attribute: this.attribute,
+            // 稀有度(索引把 r/sr/ssr/ex 与 4星/★4 解析成 cardRarity, 精确匹配)
+            cardRarity: this.rarity,
+            rarityLabel: this.rarityLabel()
         };
     }
 }

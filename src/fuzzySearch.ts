@@ -268,6 +268,22 @@ export function fuzzySearch(server: Server, keyword: string): FuzzySearchResult 
     return matches;
 }
 
+/**
+ * target 的某个字符串字段(含字符串数组)是否包含该词(忽略大小写)。
+ * `_all` 的子串匹配与调用方的"死词剔除"(search.ts 的 pruneDeadWords)共用同一口径。
+ */
+export function targetHasSubstring(target: Record<string, unknown>, word: string): boolean {
+    for (const key in target) {
+        const value = target[key];
+        if (typeof value === 'string') {
+            if (value.toLowerCase().includes(word)) return true;
+        } else if (Array.isArray(value)) {
+            if (value.some(v => typeof v === 'string' && v.toLowerCase().includes(word))) return true;
+        }
+    }
+    return false;
+}
+
 export function match(matches: FuzzySearchResult, target: any, numberTypeKey: string[]): boolean {
     if (!target) {
         return false;
@@ -275,12 +291,13 @@ export function match(matches: FuzzySearchResult, target: any, numberTypeKey: st
     if (Object.keys(matches).length == 0) {
         return true;
     }
-    let match = false;
+    let hasTypedKey = false;
 
     for (const key in matches) {
         if (key === '_number' || key === '_relationStr' || key === '_all') {
             continue;
         }
+        hasTypedKey = true;
 
         // 匹配关键词
         if (target[key] !== undefined) {
@@ -309,12 +326,10 @@ export function match(matches: FuzzySearchResult, target: any, numberTypeKey: st
                     }
                 }
                 if (matchArray) {
-                    match = true;
                     continue;
-                } else {
-                    match = false;
-                    break;
                 }
+                // 任一 typed key 不命中 = 整体不命中(多参数 AND), 直接返回
+                return false;
             }
             // 处理 Object (string, number) 类型
             else {
@@ -322,7 +337,6 @@ export function match(matches: FuzzySearchResult, target: any, numberTypeKey: st
                     typeof target[key] === 'string' &&
                     matches[key].some((m: any) => typeof m === 'string' && m.toLowerCase() === target[key].toLowerCase())
                 ) {
-                    match = true;
                     continue;
                 }
 
@@ -330,12 +344,10 @@ export function match(matches: FuzzySearchResult, target: any, numberTypeKey: st
                     typeof target[key] === 'number' &&
                     matches[key].some((m: any) => typeof m === 'number' && m === target[key])
                 ) {
-                    match = true;
                     continue;
                 }
 
-                match = false;
-                break;
+                return false;
             }
         }
 
@@ -343,45 +355,29 @@ export function match(matches: FuzzySearchResult, target: any, numberTypeKey: st
         if (numberTypeKey.length > 0 && matches['_number'] !== undefined) {
             if (numberTypeKey.includes(key)) {
                 if (matches['_number'].includes(target[key])) {
-                    match = true;
                     continue;
-                } else {
-                    match = false;
-                    break;
                 }
+                return false;
             }
         }
     }
 
-    //如果在config中所有类型都不符合的情况下，检查 _all
-    if (!match && matches['_all'] && Object.keys(matches).length == 1) {
-        for (let i = 0; i < matches['_all'].length; i++) {
-            let matchValue = matches['_all'][i];
-            if (typeof matches['_all'][i] === 'string') {
-                matchValue = (matches['_all'][i] as string).toLowerCase();
-            }
-            for (const key in target) {
-                if (typeof target[key] === 'string') {
-                    if (target[key].toLowerCase().includes(matchValue as string)) {
-                        match = true;
-                        break;
-                    }
-                }
-                if (Array.isArray(target[key])) {
-                    for (let j = 0; j < target[key].length; j++) {
-                        if (typeof target[key][j] === 'string') {
-                            if (target[key][j].toLowerCase().includes(matchValue as string)) {
-                                match = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+    // `_all`(索引没解析成实体的词)按子串在 target 的字符串字段里找。
+    // 多参数 = **同时满足**: 每个词都要出现, 任一没出现就整体不命中 ——
+    // 「nnk ssr」= nnk 的结果 ∩ ssr 的结果, 而不是命中一个就返回。
+    // (谁都命中不了的"死词"不在这里处理: 调用方按候选全集先把它剔掉, 见 search.ts 的 pruneDeadWords)
+    if (matches['_all'] !== undefined && matches['_all'].length > 0) {
+        const words = (matches['_all'] as Array<string | number>).map(v => String(v).toLowerCase());
+        return words.every(word => targetHasSubstring(target, word));
     }
 
-    return match;
+    // 走到这里 = 上面每个 typed key 都命中了(有任一不命中会直接 return false)
+    if (hasTypedKey) {
+        return true;
+    }
+    // 只剩 _relationStr(歌曲 ID 范围)时, 过滤交给调用方的 checkRelationList, 这里不参与判定;
+    // 只剩 _number 时维持原行为(不参与过滤 = 不命中)。
+    return matches['_relationStr'] !== undefined;
 }
 
 // 数字与范围函数

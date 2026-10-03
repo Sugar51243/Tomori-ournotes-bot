@@ -18,8 +18,45 @@ import { cardTypeTextIds } from './types/Card';
  * v7: 新增卡片属性(cardType), 供活动按「加成属性」检索
  * v8: 别名改为**跨区域取并集** —— 上游 jp 的 MasterText 几乎没有中文列,
  *     只按本区域取文本会让日服索引只有日文别名, 中文查询在日服上搜不到
+ * v9: 卡片属性补充模糊别名 —— 朴素颜色词(蓝→绀碧)、多语言色名(blue/青/빨강)与元素联想(水→蓝)
+ * v10: 新增卡片稀有度维度(cardRarity): r/sr/ssr/ex 与 4星/★4 走精确匹配
  */
-const FUZZY_INDEX_VERSION = 8;
+const FUZZY_INDEX_VERSION = 10;
+
+/**
+ * 卡片属性的模糊别名(与官方文本别名一起并入 cardType)。
+ *
+ * 官方名是 绯红/绀碧/翡翠/琉金/紫苑(英 Ruby/Azure/Jade/Amber/Violet), 玩家嘴里却是
+ * 朴素颜色词或元素联想 —— 只认官方名的话「蓝」「blue」「水」都搜不到。
+ * 这些词已核对过与全部实体别名(歌名/角色名/卡名/…)**零冲突**, 可安全并入。
+ * 简繁/日/英/韩都收: 中文用户在日服查、日韩用户用本语言色名, 都能命中同一属性。
+ */
+const CARD_TYPE_EXTRA_ALIASES: Record<number, string[]> = {
+    // 红: 火/炎
+    1: ['红', '紅', '红色', '紅色', '赤', '火', '炎', 'red', 'fire', 'flame', '빨강', '빨간'],
+    // 蓝: 水/冰 (青在日语里就是蓝)
+    2: ['蓝', '藍', '蓝色', '藍色', '青', '水', '冰', 'blue', 'water', 'ice', '파랑', '파란'],
+    // 绿: 草/木/森
+    3: ['绿', '綠', '绿色', '綠色', '緑', '草', '木', '森', 'green', 'grass', 'leaf', 'tree', '초록', '녹색'],
+    // 黄: 光/雷/电
+    4: ['黄', '黃', '黄色', '黃色', '光', '雷', '电', '電', 'yellow', 'light', 'thunder', 'electric', '노랑', '노란'],
+    // 紫: 暗/影
+    5: ['紫', '紫色', '暗', '闇', '影', 'purple', 'violet', 'dark', 'shadow', '보라']
+};
+
+/**
+ * 卡片稀有度 -> 类型键 cardRarity(与 cardType 同构: 数值维度, 精确匹配)。
+ *
+ * 星数写法与英文缩写都要认。**必须是精确维度**:稀有度若只靠子串回退,
+ * 「sr」会因为 `'ssr'.includes('sr')` 把 SSR 卡一起捞进来(实测 26 SR + 12 SSR)。
+ * 这些缩写已核对过与全部实体别名零冲突。
+ */
+const CARD_RARITY_ALIASES: Record<number, string[]> = {
+    2: ['2星', '★2', 'r'],
+    3: ['3星', '★3', 'sr'],
+    4: ['4星', '★4', 'ssr'],
+    10: ['10星', '★10', 'ex']
+};
 
 /**
  * 别名索引构建: 由本区域 masterdata 生成模糊搜索配置。
@@ -136,14 +173,20 @@ async function buildConfig(server: Server): Promise<FuzzySearchConfig> {
     for (const gacha of gachas) {
         add('gachaId', gacha.id, aliasVariants(await localeVariants(gacha.nameTextId)));
     }
-    // 卡片属性(绯红/绀碧/翡翠/琉金/紫苑) -> 类型键 cardType; 主要供活动按「加成属性」检索
+    // 卡片属性(绯红/绀碧/翡翠/琉金/紫苑) -> 类型键 cardType; 供活动(加成属性)/歌曲(乐曲属性)/卡片(卡片属性)三处检索
     for (const [value, textId] of Object.entries(cardTypeTextIds)) {
         const names = await localeVariants(textId);
         add('cardType', value, aliasVariants([
             ...names,
             // 官方文案形如「绯红属性 / 紅赤タイプ」, 去掉后缀让「绯红」也能命中
-            ...names.map(n => n.replace(/\s*(属性|屬性|タイプ|타입|types?|type)$/i, '').trim())
+            ...names.map(n => n.replace(/\s*(属性|屬性|タイプ|타입|types?|type)$/i, '').trim()),
+            // 朴素颜色词 / 多语言色名 / 元素联想(见 CARD_TYPE_EXTRA_ALIASES)
+            ...(CARD_TYPE_EXTRA_ALIASES[Number(value)] ?? [])
         ]));
+    }
+    // 卡片稀有度(r/sr/ssr/ex、4星/★4) -> 类型键 cardRarity; 精确匹配, 不与子串回退混用
+    for (const [value, aliases] of Object.entries(CARD_RARITY_ALIASES)) {
+        add('cardRarity', value, aliasVariants(aliases));
     }
     // 贴纸(名称多语言) -> 类型键 stampId; 角色名/团体名的命中走 characterId / bandId 两个既有类型
     for (const stamp of await store.stampList()) {

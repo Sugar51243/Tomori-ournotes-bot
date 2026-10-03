@@ -118,6 +118,10 @@ export class Card {
             characterId: this.characterId,
             characterName: this.characterName,
             rarityLabel: this.rarityLabel(),
+            // 稀有度数值维度(索引把 r/sr/ssr/ex 与 4星/★4 解析成 cardRarity, 精确匹配)
+            cardRarity: this.rarity,
+            // 卡片属性: 索引里「绯红/绀碧/…」解析成 cardType 的 1..5(attribute 是同一属性的本地化名, 供子串回退)
+            cardType: this.cardType,
             attribute: this.attribute,
             // 乐团分类(角色所属乐队)
             bandId: this.bandId

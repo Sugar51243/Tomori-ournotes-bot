@@ -26,18 +26,38 @@ const uniq = (xs: number[]): number[] => [...new Set(xs)];
 /**
  * `_all` 子串回退: 未解析成实体的词, 用索引别名做子串匹配(match() 的 `_all` 同口径),
  * 得到命中的 id。上游名称常带后缀(如活动名 "アイの奔流 atoz"), 只搜词干时靠这里命中。
+ *
+ * @returns ids 与 `used` —— 被用来命中实体的词。这些词**已经**通过这个维度表达了语义,
+ *          调用方要把它们从 `_all` 里移除, 否则会再当一次子串约束:
+ *          「mujica」解析成乐团是对的, 但卡片名里恰好有 2 张含 "mujica",
+ *          不消费掉就会把 28 张乐团卡缩成那 2 张。
  */
-export function substringIds(server: Server, type: string, words: string[]): number[] {
-    if (words.length === 0) return [];
+export function substringMatch(server: Server, type: string, words: string[]): { ids: number[]; used: Set<string> } {
+    const used = new Set<string>();
+    if (words.length === 0) return { ids: [], used };
     const bucket = getFuzzyConfig(server)[type] ?? {};
     const lowered = words.map(w => w.toLowerCase());
-    const out: number[] = [];
+    const ids: number[] = [];
     for (const [key, aliases] of Object.entries(bucket)) {
-        if (aliases.some(alias => typeof alias === 'string' && lowered.some(w => alias.includes(w)))) {
-            out.push(Number(key));
-        }
+        const hit = aliases.some(alias => {
+            if (typeof alias !== 'string') return false;
+            let any = false;
+            for (const w of lowered) {
+                if (alias.includes(w)) {
+                    used.add(w);
+                    any = true;
+                }
+            }
+            return any;
+        });
+        if (hit) ids.push(Number(key));
     }
-    return out;
+    return { ids, used };
+}
+
+/** 只取命中 id 的简版(不关心消化了哪些词时用) */
+export function substringIds(server: Server, type: string, words: string[]): number[] {
+    return substringMatch(server, type, words).ids;
 }
 
 /** 角色 id -> 其所属乐团 id(乐团端点按角色搜索、歌曲按角色搜索都走这里) */

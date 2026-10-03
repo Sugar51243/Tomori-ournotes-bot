@@ -157,7 +157,10 @@ export class Song {
             songLevels: this.difficulty.map(d => d.playLevel),
             tagLabel: this.row?.titleTextID ?? '',
             // 乐团分类(可为复数: 对唱/合作曲)
-            bandId: this.row?.bandIDs ?? []
+            bandId: this.row?.bandIDs ?? [],
+            // 乐曲属性(1=红 2=蓝 3=绿 4=黄 5=紫, 与卡片同一套编号): 索引把「绯红/绀碧/…」解析成 cardType, 这里按同一键匹配
+            cardType: this.musicType,
+            attribute: this.attribute
         };
     }
 }

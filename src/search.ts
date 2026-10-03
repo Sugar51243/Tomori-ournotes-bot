@@ -1,6 +1,6 @@
 import { ensureFuzzyIndex } from './fuzzyIndex';
 import { refreshRegion, storeFor } from './data/region';
-import { fuzzySearch, match, checkRelationList, FuzzySearchResult } from './fuzzySearch';
+import { fuzzySearch, match, checkRelationList, targetHasSubstring, FuzzySearchResult } from './fuzzySearch';
 import { Server, withServer } from './types/Server';
 import { Song } from './types/Song';
 import { Card } from './types/Card';
@@ -12,7 +12,7 @@ import { Event } from './types/Event';
 import {
     bandsOfCharacters, cardKeysOfCharacters, characterIdsOfEvents,
     eventIdsOfCardKeys, eventIdsOfGachaIds, eventIdsOfSongIds,
-    gachaIdsOfCardKeys, gachaIdsOfEventIds, songIdsOfEvents, substringIds
+    gachaIdsOfCardKeys, gachaIdsOfEventIds, songIdsOfEvents, substringIds, substringMatch
 } from './searchRelated';
 
 /**
@@ -76,6 +76,70 @@ export function substringWords(matches: FuzzySearchResult): string[] {
         .filter(Boolean);
 }
 
+/**
+ * 关联维度解析的记账本: 记录"已经被用来命中**实体自身字段**的词"。
+ * 这些词不该再当子串约束 —— 「mujica」解析成乐团(28 张卡)才是用户的意思,
+ * 但它恰好也出现在 2 张卡的名字里, 不消费掉就会把结果缩成那 2 张。
+ *
+ * 只对**自身字段**消费(bandId/characterId 之于卡片、bandId 之于歌曲…):
+ * 那些维度的条件已经由 typed key 把关, 再要求子串就是重复计算。
+ * 转蛋/活动这类**关联**维度不消费 —— 否则「ssr」会被某个叫「SSR 確定」的转蛋名消化掉,
+ * 用户要的"稀有度 SSR"这个约束就丢了。
+ */
+function makeWordLedger(server: Server): {
+    ids: (type: string, words: string[]) => number[];
+    unused: (words: string[]) => string[];
+    strip: (out: FuzzySearchResult) => FuzzySearchResult;
+} {
+    const used = new Set<string>();
+    return {
+        ids(type, words) {
+            if (!words.length) return [];
+            const m = substringMatch(server, type, words);
+            m.used.forEach(w => used.add(w));
+            return m.ids;
+        },
+        /** 还没被任何自身维度解释过的词 —— 只有这些才该继续去解析关联维度 */
+        unused(words) {
+            return words.filter(w => !used.has(w.toLowerCase()));
+        },
+        strip(out) {
+            if (!used.size || out['_all'] === undefined) return out;
+            const rest = (out['_all'] as Array<string | number>).filter(w => !used.has(String(w).toLowerCase()));
+            if (rest.length) out['_all'] = rest;
+            else delete out['_all'];
+            return out;
+        }
+    };
+}
+
+/**
+ * `_all` 的"宽容 AND": 多参数查询里索引没解析成实体的词, 该怎么参与过滤。
+ * - 在**全部候选中都找不到**的词 = 错别字/噪声 -> 从约束里剔掉, 免得把一个本来有效的结果清空;
+ * - 剩下有命中的词 -> 每个都必须在实体自己的字段里出现(由 match() 做 AND)。
+ * 例: `MyGO ssr` = MyGO ∩ SSR;`MyGO zzz` = MyGO(zzz 谁都命中不了, 忽略)。
+ * @param targets 该端点**全部**候选的 fuzzyTarget(先于其它过滤条件, 保证"有命中"是全局判断)
+ * @returns 改写后的 matches;`undefined` = 词全死光且再无其它约束 —— 再往下就退化成"不过滤"
+ *          (把整张表倒出来), 调用方应直接返回空。
+ */
+function pruneDeadWords(matches: FuzzySearchResult, targets: Array<Record<string, unknown>>): FuzzySearchResult | undefined {
+    const words = matches['_all'] as Array<string | number> | undefined;
+    if (!words || words.length === 0) return matches;
+    const live = words.filter(w => {
+        const word = String(w).toLowerCase();
+        return targets.some(t => targetHasSubstring(t, word));
+    });
+    if (live.length === words.length) return matches;
+    const out: FuzzySearchResult = { ...matches };
+    if (live.length) {
+        out['_all'] = live;
+        return out;
+    }
+    delete out['_all'];
+    // 只剩 _number / _relationStr 也算"还有约束"(前者在 match 里不通过, 后者由范围过滤处理)
+    return Object.keys(out).length ? out : undefined;
+}
+
 /** 按模糊搜索结果过滤歌曲(全部来自指定区域) */
 export async function searchSongs(server: Server, matches: FuzzySearchResult): Promise<Song[]> {
     await refreshRegion(server);
@@ -90,34 +154,39 @@ export async function searchSongs(server: Server, matches: FuzzySearchResult): P
 async function resolveSongMatches(server: Server, matches: FuzzySearchResult): Promise<FuzzySearchResult | undefined> {
     const out = pickKeys(matches, FILTER_KEYS);
     if (hasKeys(matches, IDENTITY_KEYS.song)) {
-        Object.assign(out, pickKeys(matches, IDENTITY_KEYS.song));
-        return out;
+        // ID 命中时其余维度一并保留(多参数 AND); 目标没有的键由 match() 忽略
+        return { ...matches };
     }
     // 关联: 乐团(歌曲自带 bandId) / 角色(-> 所属乐团) / 活动(-> 活动曲目)
     // 精确命中(索引键)与子串命中(_all, 如只搜活动名词干)都算
     const words = substringWords(matches);
-    const bandIds = mergeNumbers(numIds(matches, 'bandId'), substringIds(server, 'bandId', words));
+    const ledger = makeWordLedger(server);
+    const bandIds = mergeNumbers(numIds(matches, 'bandId'), ledger.ids('bandId', words));
     if (bandIds.length) out['bandId'] = bandIds;
-    const byChars = await bandsOfCharacters(server, mergeNumbers(numIds(matches, 'characterId'), substringIds(server, 'characterId', words)));
+    const byChars = await bandsOfCharacters(server, mergeNumbers(numIds(matches, 'characterId'), ledger.ids('characterId', words)));
     if (byChars.length) out['bandId'] = mergeNumbers((out['bandId'] ?? []) as number[], byChars);
+    // 活动 -> 曲目是**关联**映射(歌曲自身没有活动字段), 这类词不消费
     const byEvents = await songIdsOfEvents(server, mergeNumbers(numIds(matches, 'eventId'), substringIds(server, 'eventId', words)));
     if (byEvents.length) out['songId'] = byEvents;
+    ledger.strip(out);
     return Object.keys(out).length ? out : undefined;
 }
 
 async function filterSongs(server: Server, matches: FuzzySearchResult): Promise<Song[]> {
     const store = storeFor(server);
     const rows = await store.songs();
-    const songs: Song[] = [];
+    // 先建好候选与各自的 fuzzyTarget: "死词剔除"与正式过滤共用同一份, init 仍只做一次
+    const candidates: Array<{ song: Song; target: Record<string, unknown> }> = [];
     for (const row of rows) {
         const song = withServer(new Song(row.id), server);
         await song.init();
-        if (match(matches, song.fuzzyTarget(), ['songLevels'])) {
-            songs.push(song);
-        }
+        candidates.push({ song, target: song.fuzzyTarget() });
     }
-    if (matches['_relationStr'] && matches['_relationStr'].length > 0) {
-        return songs.filter(s => checkRelationList(s.songId, matches['_relationStr'] as string[]));
+    const effective = pruneDeadWords(matches, candidates.map(c => c.target));
+    if (!effective) return [];
+    const songs = candidates.filter(c => match(effective, c.target, ['songLevels'])).map(c => c.song);
+    if (effective['_relationStr'] && effective['_relationStr'].length > 0) {
+        return songs.filter(s => checkRelationList(s.songId, effective['_relationStr'] as string[]));
     }
     return songs;
 }
@@ -154,38 +223,56 @@ export async function searchCards(server: Server, matches: FuzzySearchResult, ki
     await ensureFuzzyIndex(server);
 
     // 自信息: 卡片自身的 ID(两类) / 过滤维度; 关联: 角色/乐团(卡片自带) + 活动/卡池(-> UP 卡与活动卡的键)
-    let fuzzy: FuzzySearchResult;
-    let relatedKeys: Set<string> | undefined;
-    if (hasKeys(matches, IDENTITY_KEYS.card)) {
-        fuzzy = { ...pickKeys(matches, FILTER_KEYS), ...pickKeys(matches, IDENTITY_KEYS.card) };
-    } else {
-        const words = substringWords(matches);
-        fuzzy = { ...pickKeys(matches, FILTER_KEYS) };
-        const bandIds = mergeNumbers(numIds(matches, 'bandId'), substringIds(server, 'bandId', words));
-        const charIds = mergeNumbers(numIds(matches, 'characterId'), substringIds(server, 'characterId', words));
-        if (bandIds.length) fuzzy['bandId'] = bandIds;
-        if (charIds.length) fuzzy['characterId'] = charIds;
-        relatedKeys = await cardKeysFromRelated(server, matches, words);
-    }
+    // 命中 ID 与否都做同一套解析 —— 多参数要一并生效(「mujica 4星」= 该团 ∩ 4 星,
+    // 命中「4星」不代表可以把「mujica」丢掉);目标没有的键由 match() 忽略。
+    const words = substringWords(matches);
+    const ledger = makeWordLedger(server);
+    const fuzzy: FuzzySearchResult = { ...matches };
+    const bandIds = mergeNumbers(numIds(matches, 'bandId'), ledger.ids('bandId', words));
+    const charIds = mergeNumbers(numIds(matches, 'characterId'), ledger.ids('characterId', words));
+    if (bandIds.length) fuzzy['bandId'] = bandIds;
+    if (charIds.length) fuzzy['characterId'] = charIds;
+    // 关联维度只用"还没被自身维度解释过"的词: 「mujica」已解析成乐团, 就不该再去翻
+    // 「叫 mujica 的转蛋」;剩下的词(如活动名)才走活动/卡池 -> 卡片
+    const leftover = ledger.unused(words);
+    const relatedKeys = leftover.length ? await cardKeysFromRelated(server, matches, leftover) : undefined;
+    ledger.strip(fuzzy);
     // 空匹配 = 不过滤(全部卡片)
     const matchAll = Object.keys(matches).length === 0;
     if (!matchAll && Object.keys(fuzzy).length === 0 && !relatedKeys?.size) return [];
 
     const store = storeFor(server);
-    const cards: AnyCard[] = [];
+    // 两类卡一起收集后再过滤: "死词剔除"要在成员卡+支援卡的全集上判断
+    const candidates: Array<{ card: AnyCard; target: Record<string, unknown> }> = [];
     if (kind !== 'support') {
         for (const row of await store.cardList()) {
             const card = withServer(new Card(row.id), server);
             await card.init();
-            if (relatedKeys?.has(`m:${card.cardId}`) || match(fuzzy, card.fuzzyTarget(), [])) cards.push(card);
+            candidates.push({ card, target: card.fuzzyTarget() });
         }
     }
     if (kind !== 'member') {
         for (const row of await store.supportCardList()) {
             const support = withServer(new SupportCard(row.id), server);
             await support.init();
-            if (relatedKeys?.has(`s:${support.supportCardId}`) || match(fuzzy, support.fuzzyTarget(), [])) cards.push(support);
+            candidates.push({ card: support, target: support.fuzzyTarget() });
         }
+    }
+    // 词全死光时: 还有关联命中就按关联出结果(死词当作噪声), 否则返回空
+    const effective = pruneDeadWords(fuzzy, candidates.map(c => c.target)) ?? (relatedKeys?.size ? {} : undefined);
+    if (!effective) return [];
+    // 未消费的 `_all` 词是"额外参数", 所有结果都要满足(AND); 关联命中(活动/卡池 -> 卡)
+    // 与自身维度一样是硬条件 —— 参数之间是 AND, 只有同一批词的多种解释才取并(已在上面的
+    // "已消费的词不再解析关联"里处理掉)。
+    const { _all: residual, ...base } = effective;
+    const residualWords = ((residual ?? []) as Array<string | number>).map(w => String(w).toLowerCase());
+    const cards: AnyCard[] = [];
+    for (const { card, target } of candidates) {
+        const key = isMemberCard(card) ? `m:${card.cardId}` : `s:${(card as SupportCard).supportCardId}`;
+        if (relatedKeys?.size && !relatedKeys.has(key)) continue;
+        if (!match(base, target, [])) continue;
+        if (residualWords.length && !residualWords.every(w => targetHasSubstring(target, w))) continue;
+        cards.push(card);
     }
     return cards;
 }
@@ -194,6 +281,7 @@ export async function searchCards(server: Server, matches: FuzzySearchResult, ki
 async function cardKeysFromRelated(server: Server, matches: FuzzySearchResult, words: string[]): Promise<Set<string>> {
     const index = await storeFor(server).relatedIndex();
     const keys = new Set<string>();
+    // 活动/卡池 -> 卡片是关联映射(卡片自身没有这些字段), 不消费词
     const eventIds = mergeNumbers(numIds(matches, 'eventId'), substringIds(server, 'eventId', words));
     for (const id of eventIds) {
         for (const key of index.cardKeysByEvent.get(id) ?? []) keys.add(key);
@@ -213,28 +301,32 @@ export async function searchCharacters(server: Server, matches: FuzzySearchResul
     // 自信息: characterId; 关联: 乐团(角色自带 bandId) + 活动(-> 该活动的加成/相关角色)
     let fuzzy: FuzzySearchResult;
     if (hasKeys(matches, IDENTITY_KEYS.character)) {
-        fuzzy = { ...pickKeys(matches, FILTER_KEYS), ...pickKeys(matches, IDENTITY_KEYS.character) };
+        // ID 命中时其余维度一并保留(多参数 AND); 目标没有的键由 match() 忽略
+        fuzzy = { ...matches };
     } else {
         const words = substringWords(matches);
+        const ledger = makeWordLedger(server);
         fuzzy = { ...pickKeys(matches, FILTER_KEYS) };
-        const bandIds = mergeNumbers(numIds(matches, 'bandId'), substringIds(server, 'bandId', words));
+        const bandIds = mergeNumbers(numIds(matches, 'bandId'), ledger.ids('bandId', words));
         if (bandIds.length) fuzzy['bandId'] = bandIds;
+        // 活动 -> 角色是关联映射(角色自身没有活动字段), 不消费词
         const byEvents = await characterIdsOfEvents(server, mergeNumbers(numIds(matches, 'eventId'), substringIds(server, 'eventId', words)));
         if (byEvents.length) fuzzy['characterId'] = byEvents;
+        ledger.strip(fuzzy);
     }
     // 空匹配 = 不过滤(全部角色)
     if (Object.keys(matches).length > 0 && Object.keys(fuzzy).length === 0) return [];
 
     const rows = await storeFor(server).characters();
-    const characters: Character[] = [];
+    const candidates: Array<{ character: Character; target: Record<string, unknown> }> = [];
     for (const row of rows) {
         const c = withServer(new Character(row.id), server);
         await c.init();
-        if (match(fuzzy, c.fuzzyTarget(), [])) {
-            characters.push(c);
-        }
+        candidates.push({ character: c, target: c.fuzzyTarget() });
     }
-    return characters;
+    const effective = pruneDeadWords(fuzzy, candidates.map(c => c.target));
+    if (!effective) return [];
+    return candidates.filter(c => match(effective, c.target, [])).map(c => c.character);
 }
 
 /** 按模糊搜索结果过滤乐团(名称/别名 + 自定义关键词) */
@@ -245,10 +337,12 @@ export async function searchBands(server: Server, matches: FuzzySearchResult): P
     // 自信息: bandId; 关联: 角色(-> 该角色的所属乐团)
     let fuzzy: FuzzySearchResult;
     if (hasKeys(matches, IDENTITY_KEYS.band)) {
-        fuzzy = { ...pickKeys(matches, FILTER_KEYS), ...pickKeys(matches, IDENTITY_KEYS.band) };
+        // ID 命中时其余维度一并保留(多参数 AND); 目标没有的键由 match() 忽略
+        fuzzy = { ...matches };
     } else {
         fuzzy = pickKeys(matches, FILTER_KEYS);
         const words = substringWords(matches);
+        // 角色 -> 乐团是关联映射(乐团自身没有角色字段), 不消费词
         const bands = await bandsOfCharacters(server, mergeNumbers(numIds(matches, 'characterId'), substringIds(server, 'characterId', words)));
         if (bands.length) fuzzy['bandId'] = bands;
     }
@@ -256,15 +350,15 @@ export async function searchBands(server: Server, matches: FuzzySearchResult): P
     if (Object.keys(matches).length > 0 && Object.keys(fuzzy).length === 0) return [];
 
     const rows = await storeFor(server).bandList();
-    const bands: Band[] = [];
+    const candidates: Array<{ band: Band; target: Record<string, unknown> }> = [];
     for (const row of rows) {
         const band = withServer(new Band(row.id), server);
         await band.init();
-        if (match(fuzzy, band.fuzzyTarget(), [])) {
-            bands.push(band);
-        }
+        candidates.push({ band, target: band.fuzzyTarget() });
     }
-    return bands;
+    const effective = pruneDeadWords(fuzzy, candidates.map(c => c.target));
+    if (!effective) return [];
+    return candidates.filter(c => match(effective, c.target, [])).map(c => c.band);
 }
 
 /** 按模糊搜索结果过滤卡池 */
@@ -275,10 +369,12 @@ export async function searchGachas(server: Server, matches: FuzzySearchResult): 
     // 自信息: gachaId; 关联: 卡片(-> 该卡作为 UP 的卡池) / 角色/乐团(-> 其卡片 -> 卡池) / 活动(启发式)
     let fuzzy: FuzzySearchResult;
     if (hasKeys(matches, IDENTITY_KEYS.gacha)) {
-        fuzzy = { ...pickKeys(matches, FILTER_KEYS), ...pickKeys(matches, IDENTITY_KEYS.gacha) };
+        // ID 命中时其余维度一并保留(多参数 AND); 目标没有的键由 match() 忽略
+        fuzzy = { ...matches };
     } else {
         fuzzy = pickKeys(matches, FILTER_KEYS);
         const words = substringWords(matches);
+        // 卡片/角色/乐团/活动 -> 卡池全是关联映射(卡池自身只有名字), 不消费词
         const gachaIds = new Set<number>();
         const cardKeys = [
             ...numIds(matches, 'cardId').map(id => `m:${id}`),
@@ -299,15 +395,15 @@ export async function searchGachas(server: Server, matches: FuzzySearchResult): 
     if (Object.keys(matches).length > 0 && Object.keys(fuzzy).length === 0) return [];
 
     const rows = await storeFor(server).gachaList();
-    const gachas: Gacha[] = [];
+    const candidates: Array<{ gacha: Gacha; target: Record<string, unknown> }> = [];
     for (const row of rows) {
         const g = withServer(new Gacha(row.id), server);
         await g.init();
-        if (match(fuzzy, g.fuzzyTarget(), [])) {
-            gachas.push(g);
-        }
+        candidates.push({ gacha: g, target: g.fuzzyTarget() });
     }
-    return gachas;
+    const effective = pruneDeadWords(fuzzy, candidates.map(c => c.target));
+    if (!effective) return [];
+    return candidates.filter(c => match(effective, c.target, [])).map(c => c.gacha);
 }
 
 /**
@@ -355,16 +451,18 @@ function splitEventKeywords(matches: FuzzySearchResult): {
 async function resolveEventMatches(server: Server, rest: FuzzySearchResult): Promise<FuzzySearchResult | undefined> {
     const out = pickKeys(rest, FILTER_KEYS);
     if (hasKeys(rest, IDENTITY_KEYS.event)) {
-        Object.assign(out, pickKeys(rest, IDENTITY_KEYS.event));
-        return out;
+        // ID 命中时其余维度一并保留(多参数 AND); 目标没有的键由 match() 忽略
+        return { ...rest };
     }
     // 关联: 乐团/角色(活动的加成字段, 直接 match) + 卡池/卡片/歌曲(-> 相关活动 id)
     // 精确命中(索引键)与子串命中(_all)都算
     const words = substringWords(rest);
-    const bandIds = mergeNumbers(numIds(rest, 'bandId'), substringIds(server, 'bandId', words));
-    const charIds = mergeNumbers(numIds(rest, 'characterId'), substringIds(server, 'characterId', words));
+    const ledger = makeWordLedger(server);
+    const bandIds = mergeNumbers(numIds(rest, 'bandId'), ledger.ids('bandId', words));
+    const charIds = mergeNumbers(numIds(rest, 'characterId'), ledger.ids('characterId', words));
     if (bandIds.length) out['bandId'] = bandIds;
     if (charIds.length) out['characterId'] = charIds;
+    // 卡池/卡片/歌曲 -> 活动是关联映射(活动自身没有这些字段), 不消费词
     const related = new Set<number>([
         ...await eventIdsOfGachaIds(server, mergeNumbers(numIds(rest, 'gachaId'), substringIds(server, 'gachaId', words))),
         ...await eventIdsOfCardKeys(server, [
@@ -376,6 +474,7 @@ async function resolveEventMatches(server: Server, rest: FuzzySearchResult): Pro
         ...await eventIdsOfSongIds(server, mergeNumbers(numIds(rest, 'songId'), substringIds(server, 'songId', words)))
     ]);
     if (related.size) out['eventId'] = [...related];
+    ledger.strip(out);
     return Object.keys(out).length ? out : undefined;
 }
 
@@ -393,11 +492,19 @@ export async function searchEvents(server: Server, matches: FuzzySearchResult): 
     if (!onlyTimeFilters && !resolved) return [];
 
     const rows = await storeFor(server).eventList();
-    const events: Event[] = [];
+    const candidates: Array<{ event: Event; target: Record<string, unknown> }> = [];
     for (const row of rows) {
         const e = withServer(new Event(row.id), server);
         await e.init();
-        if (!onlyTimeFilters && !match(resolved!, e.fuzzyTarget(), [])) continue;
+        candidates.push({ event: e, target: e.fuzzyTarget() });
+    }
+    // 关键词一个都没命中(且没有状态/日期筛选) -> 返回空, 不退化成"全部活动"
+    const effective = onlyTimeFilters ? undefined : pruneDeadWords(resolved!, candidates.map(c => c.target));
+    if (!onlyTimeFilters && !effective) return [];
+
+    const events: Event[] = [];
+    for (const { event: e, target } of candidates) {
+        if (effective && !match(effective, target, [])) continue;
         if (!statuses.every(t => t(e, now))) continue;
         if (dates.length) {
             // 日期串与开放/结束时间做子串匹配(已把 - 统一成 /)
