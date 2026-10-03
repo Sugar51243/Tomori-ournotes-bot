@@ -1,11 +1,10 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { listToBase64, pickEntityInput, EntityInput } from '../utils';
-import { isServerInput, pickServers, Server } from '../../types/Server';
+import { listToBase64, pickEntityInput } from '../utils';
+import { isServerInput, pickServers } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult } from '../../fuzzySearch';
-import { searchSongs, textToFuzzyResult } from '../../search';
-import { drawSongRandom } from '../../view/song/songRandom';
+import { isFuzzySearchResult } from '../../search/fuzzySearch';
+import { commandSongRandom } from '../../features/song/songRandom';
 
 /**
  * 随机歌曲(多服)。
@@ -40,24 +39,5 @@ router.post(
         }
     }
 );
-
-export interface SongRandomQuery {
-    /** 不传 = 从全部歌曲随机 */
-    input?: EntityInput;
-    compress?: boolean;
-}
-
-export async function commandSongRandom(servers: Server[], query: SongRandomQuery): Promise<Array<Buffer | string>> {
-    const server = servers[0];
-    let candidates;
-    if (query.input === undefined) {
-        candidates = await searchSongs(server, {});
-    } else if (typeof query.input === 'string') {
-        candidates = await searchSongs(server, await textToFuzzyResult(server, query.input));
-    } else {
-        candidates = await searchSongs(server, query.input);
-    }
-    return drawSongRandom(candidates, servers, query.compress ?? false);
-}
 
 export { router as songRandomRouter };

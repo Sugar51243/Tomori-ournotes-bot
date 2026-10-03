@@ -1,8 +1,8 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { middleware } from './middleware';
-import { textToFuzzyResult } from '../search';
-import { defaultServer } from '../types/Server';
+import { textToFuzzyResult } from '../search/search';
+import { defaultServer } from '../features/types/Server';
 
 const router = express.Router();
 

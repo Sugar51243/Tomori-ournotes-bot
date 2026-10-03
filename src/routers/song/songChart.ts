@@ -1,14 +1,11 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64, pickEntityInput } from '../utils';
-import { fallbackChain, isServerInput, Server } from '../../types/Server';
+import { listToBase64, pickEntityInput } from '../utils';
+import { fallbackChain, isServerInput } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult } from '../../fuzzySearch';
-import { drawSongChart } from '../../view/song/songChart';
-import { drawSongList } from '../../view/song/songList';
-import { firstServerHavingSong } from '../../data/serverInfo';
-import { findSongMatches } from './searchSong';
-import { NOTE_SPEED_DEFAULT, NOTE_SPEED_MIN, NOTE_SPEED_MAX } from '../../components/OurNotesPreview';
+import { isFuzzySearchResult } from '../../search/fuzzySearch';
+import { NOTE_SPEED_DEFAULT, NOTE_SPEED_MIN, NOTE_SPEED_MAX } from '../../render/component/OurNotesPreview';
+import { commandSongChart } from '../../features/song/songChart';
 
 /**
  * 谱面图(单服回退)。
@@ -43,54 +40,19 @@ router.post(
         }
         const options = {
             difficultyId: req.body.difficultyId ?? 3,
-            compress: req.body.compress ?? false,
+            compress: req.body.compress,
             mirror: req.body.mirror ?? false,
             noteSpeed: req.body.noteSpeed ?? req.body.speed ?? NOTE_SPEED_DEFAULT
         };
 
         try {
-            const servers = fallbackChain(req.body);
-
-            // 数字 ID(直接传或用数字文本) -> 直查
-            if (typeof input === 'string' && isInteger(input)) {
-                return sendChart(res, servers, { songId: parseInt(input, 10), ...options });
-            }
-
-            // 文字搜索: 沿回退链找候选(ID > 自信息 > 关联由 search 层保证)
-            const hit = await findSongMatches(servers, input);
-            if ('error' in hit) {
-                return res.send(listToBase64([hit.error]));
-            }
-            // 多命中 -> 歌曲列表图; 唯一命中 -> 该曲谱面图
-            if (hit.songs.length > 1) {
-                const list = await drawSongList(hit.server, hit.songs, req.body.compress);
-                return res.send(listToBase64(list));
-            }
-            return sendChart(res, servers, { songId: hit.songs[0].songId, ...options });
+            const result = await commandSongChart(fallbackChain(req.body), input, options);
+            res.send(listToBase64(result));
         } catch (e) {
             console.log(e);
             res.status(500).send({ status: 'failed', data: '内部错误' });
         }
     }
 );
-
-interface ChartQuery {
-    songId: number;
-    difficultyId: number;
-    compress: boolean;
-    mirror: boolean;
-    noteSpeed: number;
-}
-
-/** 单服回退: 沿回退链取第一个收录该曲的服出谱面图 */
-async function sendChart(res: express.Response, servers: Server[], query: ChartQuery): Promise<void> {
-    const server = await firstServerHavingSong(query.songId, servers);
-    if (!server) {
-        res.send(listToBase64(['错误: 歌曲不存在']));
-        return;
-    }
-    const result = await drawSongChart(server, query.songId, query.difficultyId, query.compress, query.mirror, query.noteSpeed);
-    res.send(listToBase64(result));
-}
 
 export { router as songChartRouter };

@@ -1,13 +1,10 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64, pickEntityInput, EntityInput } from '../utils';
-import { fallbackChain, isServerInput, SERVER_LIST, Server, withServer } from '../../types/Server';
+import { listToBase64, pickEntityInput } from '../utils';
+import { fallbackChain, isServerInput } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { isFuzzySearchResult } from '../../fuzzySearch';
-import { Band } from '../../types/Band';
-import { bandServerRows, firstOwnServer } from '../../data/serverInfo';
-import { drawBandDetail, drawBandList } from '../../view/band/bandDetail';
-import { searchBands, textToFuzzyResult } from '../../search';
+import { isFuzzySearchResult } from '../../search/fuzzySearch';
+import { commandBand } from '../../features/band/searchBand';
 
 /**
  * 查乐团(单服回退)。
@@ -46,51 +43,5 @@ router.post(
         }
     }
 );
-
-export interface BandQuery {
-    input: EntityInput;
-    compress?: boolean;
-}
-
-export async function commandBand(servers: Server[], query: BandQuery): Promise<Array<Buffer | string>> {
-    const { input, compress = false } = query;
-    if (typeof input === 'string' && isInteger(input)) {
-        const bandId = parseInt(input, 10);
-        // 图内恒列全部四服; 主体按回退链取第一个收录该乐团的服
-        const rows = await bandServerRows(bandId, [...SERVER_LIST]);
-        const bodyServer = firstOwnServer(rows, servers);
-        if (!bodyServer) return ['错误: 该乐团不存在'];
-        const band = withServer(new Band(bandId), bodyServer);
-        await band.init();
-        if (!band.isExist) return ['错误: 该乐团不存在'];
-        return drawBandDetail(band, rows, compress);
-    }
-
-    if (typeof input !== 'string') {
-        // 调用方已给定模糊搜索结果: 直接在链首服的索引上匹配
-        const bodyServer = servers[0];
-        const bands = await searchBands(bodyServer, input);
-        if (bands.length === 0) return ['没有搜索到符合条件的乐团'];
-        if (bands.length === 1) {
-            return drawBandDetail(bands[0], await bandServerRows(bands[0].bandId, [...SERVER_LIST]), compress);
-        }
-        return drawBandList(bodyServer, bands, compress);
-    }
-
-    // 文本: 沿回退链依次查各服的模糊索引, 取第一个有结果的服
-    let hasKeyword = false;
-    for (const server of servers) {
-        const matches = await textToFuzzyResult(server, input);
-        if (Object.keys(matches).length === 0) continue;
-        hasKeyword = true;
-        const bands = await searchBands(server, matches);
-        if (bands.length === 0) continue;
-        if (bands.length === 1) {
-            return drawBandDetail(bands[0], await bandServerRows(bands[0].bandId, [...SERVER_LIST]), compress);
-        }
-        return drawBandList(server, bands, compress);
-    }
-    return hasKeyword ? ['没有搜索到符合条件的乐团'] : ['错误: 没有有效的关键词'];
-}
 
 export { router as searchBandRouter };

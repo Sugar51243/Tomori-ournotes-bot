@@ -1,9 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { logger } from '../logger';
-import { cachedVersionManifest } from '../data/masterdata/client';
+import { cachedVersionManifest } from '../db/adapter';
 import { currentRenderEpoch } from '../renderEpoch';
-import { SERVER_LIST, pickServers, serverProfile } from '../types/Server';
+import { SERVER_LIST, pickServers, serverProfile } from '../features/types/Server';
 
 /**
  * 渲染结果缓存(进程内 LRU)。
@@ -73,10 +73,12 @@ function stableStringify(value: unknown): string {
     return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`;
 }
 
+/** 渲染缓存占用统计(诊断用) */
 export function renderCacheStats(): { entries: number; mb: number } {
     return { entries: entries.size, mb: Math.round(totalBytes / 1024 / 1024) };
 }
 
+/** 渲染结果缓存中间件(进程内 LRU; 当前未挂载) */
 export function renderCacheMiddleware(req: Request, res: Response, next: NextFunction): void {
     if (req.method !== 'POST' || !CACHEABLE.has(req.path)) {
         next();
