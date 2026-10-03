@@ -1,14 +1,11 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, listToBase64, pickEntityInput, EntityInput } from '../utils';
+import { listToBase64, pickEntityInput } from '../utils';
+import { fallbackChain, isServerInput } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { imageBuffer, stampUrl, assetCacheKey } from '../../data/assets';
-import { storeFor } from '../../data/region';
-import { fallbackChain, isServerInput, Server } from '../../types/Server';
-import { isFuzzySearchResult } from '../../fuzzySearch';
-import { searchStamps, allStamps, StampScope } from '../../data/stamps';
-import { textToFuzzyResult } from '../../search';
-import { drawStampList } from '../../view/stamp/stampList';
+import { isFuzzySearchResult } from '../../search/fuzzySearch';
+import type { StampScope } from '../../db/adapter';
+import { commandGetStampImage } from '../../features/stamp/getStampImage';
 
 /**
  * 贴纸查询(单服回退)。三种用法:
@@ -55,54 +52,5 @@ router.post(
         }
     }
 );
-
-export interface StampQuery {
-    /** 不传 = 列出该服全部贴纸 */
-    input?: EntityInput;
-    scope: StampScope;
-    compress?: boolean;
-}
-
-export async function commandGetStampImage(servers: Server[], query: StampQuery): Promise<Array<Buffer | string>> {
-    const { input, scope, compress = false } = query;
-    const stampId = typeof input === 'string' && isInteger(input) ? parseInt(input, 10) : undefined;
-
-    // 按 ID 直出原图: 沿回退链取第一个有该贴纸(且图片可取得)的服
-    if (stampId !== undefined) {
-        let found = false;
-        for (const server of servers) {
-            const store = storeFor(server);
-            await store.refresh();
-            const stamp = await store.stampById(stampId);
-            if (!stamp) continue;
-            found = true;
-            if (!stamp.stampAsset) continue;
-            const art = await imageBuffer(stampUrl(server, stamp.stampAsset), assetCacheKey(server, `stamp/${stampId}.webp`));
-            if (!art) continue;
-            return [art];
-        }
-        return [found ? '错误: 贴纸图片获取失败' : '错误: 该贴纸不存在'];
-    }
-
-    // 都不传: 列出链首服的全部贴纸
-    if (input === undefined) {
-        return drawStampList(servers[0], await allStamps(servers[0]), scope, '', compress);
-    }
-
-    // 模糊搜索: 沿回退链取第一个有搜索结果的服
-    const keyword = typeof input === 'string' ? input : '';
-    let hasKeyword = false;
-    for (const server of servers) {
-        const matches = typeof input === 'string' ? await textToFuzzyResult(server, input) : input;
-        if (Object.keys(matches).length === 0) continue;
-        hasKeyword = true;
-        const stamps = await searchStamps(server, matches, scope);
-        if (stamps.length === 0) continue;
-        return drawStampList(server, stamps, scope, keyword, compress);
-    }
-    return hasKeyword
-        ? drawStampList(servers[0], [], scope, keyword, compress)
-        : ['错误: 没有有效的关键词'];
-}
 
 export { router as getStampImageRouter };

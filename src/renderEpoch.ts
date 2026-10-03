@@ -9,10 +9,12 @@
  */
 let renderEpoch = 0;
 
+/** 世代号 +1: 渲染缓存键的一部分, 调用后旧缓存条目自然失效 */
 export function bumpRenderEpoch(): void {
     renderEpoch += 1;
 }
 
+/** 当前世代号(渲染缓存键用) */
 export function currentRenderEpoch(): number {
     return renderEpoch;
 }

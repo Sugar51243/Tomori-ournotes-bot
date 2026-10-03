@@ -1,8 +1,8 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { middleware } from './middleware';
-import { addKeyword, removeKeyword } from '../data/keywords';
-import { KEYWORD_ENTITY_TYPES, MAX_KEYWORD_LENGTH, KeywordEntityType } from '../types/Keyword';
+import { addKeyword, removeKeyword } from '../db/adapter';
+import { KEYWORD_ENTITY_TYPES, MAX_KEYWORD_LENGTH, KeywordEntityType } from '../features/types/Keyword';
 
 /**
  * 用户关键词(tsugu 无此功能, 自定义端点):
@@ -42,6 +42,7 @@ keywordUploadRouter.post(
     }
 );
 
+/** 删除用户关键词的路由(需 ENABLE_DB) */
 export const keywordDeleteRouter = express.Router();
 keywordDeleteRouter.post(
     '/',

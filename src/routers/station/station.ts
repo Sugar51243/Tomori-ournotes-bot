@@ -1,9 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { middleware } from '../middleware';
-import { stationsCollection } from '../../data/mongo';
-import { config } from '../../config';
-import { StationDoc, RoomView, normalizeStationTime } from '../../types/Station';
+import { commandQueryAllRooms, commandSubmitRoomNumber } from '../../features/station/station';
 
 /**
  * 车站(房间号共享): 字段与语义对齐 tsugu 的 /station/*
@@ -13,33 +11,7 @@ import { StationDoc, RoomView, normalizeStationTime } from '../../types/Station'
  */
 const DB_DISABLED = '错误: 服务器未启用数据库';
 
-/** tsugu 的 platform 归一化: onebot/red/chronocat/llonebot/Napcat → qq */
-export function normalizeSource(platform: string): string {
-    return ['onebot', 'red', 'chronocat', 'llonebot', 'napcat'].includes(platform.toLowerCase()) ? 'qq' : platform;
-}
-
-/**
- * 对外结构: **只出原值** —— 前端可能自己用 time 算「多久前」, 换算单位等于改契约。
- * timeMs 仅在服务端内部流转(出图/排序)。
- */
-export function toRoomView(doc: StationDoc): RoomView {
-    const view: RoomView = {
-        number: doc.number,
-        rawMessage: doc.rawMessage,
-        source: doc.source,
-        userId: doc.userId,
-        userName: doc.userName,
-        time: doc.time
-    };
-    if (doc.avatarUrl) view.avatarUrl = doc.avatarUrl;
-    return view;
-}
-
-/** 出图用的房间视图: 带上归一秒值(老数据没有 timeMs 时按量级现算) */
-export function toRoomViewForRender(doc: StationDoc): RoomView {
-    return { ...toRoomView(doc), timeMs: doc.timeMs ?? normalizeStationTime(doc.time) };
-}
-
+/** 车站路由(上传房号 / 查全部未过期房间) */
 export const stationRouter = express.Router();
 
 stationRouter.post(
@@ -58,28 +30,10 @@ stationRouter.post(
     async (req: express.Request, res: express.Response) => {
         const { number, rawMessage, platform, userId, userName, time, avatarUrl } = req.body;
         try {
-            const collection = await stationsCollection().catch(() => undefined);
-            if (!collection) {
+            const result = await commandSubmitRoomNumber({ number, rawMessage, platform, userId, userName, time, avatarUrl });
+            if (result === 'db_disabled') {
                 return res.status(200).send({ status: 'failed', data: DB_DISABLED });
             }
-            const now = new Date();
-            const fields: Record<string, unknown> = {
-                number,
-                rawMessage,
-                source: normalizeSource(String(platform)),
-                userId,
-                userName,
-                // time 原样存(对外 JSON 与之前完全一致); timeMs 是归一秒值, 只给出图与排序用
-                time,
-                timeMs: normalizeStationTime(time),
-                expireAt: new Date(now.getTime() + config.stationTtlS * 1000)
-            };
-            if (avatarUrl) fields.avatarUrl = avatarUrl;
-            await collection.updateOne(
-                { number },
-                { $set: fields, $setOnInsert: { createdAt: now } },
-                { upsert: true }
-            );
             res.status(200).send({ status: 'success', data: '提交成功' });
         } catch (e) {
             console.log(e);
@@ -88,22 +42,14 @@ stationRouter.post(
     }
 );
 
-/** 未过期房间文档: 按 time 倒序(每个房号只保留一条, 由 number 唯一索引保证) */
-export async function queryStations(): Promise<StationDoc[] | undefined> {
-    const collection = await stationsCollection().catch(() => undefined);
-    if (!collection) return undefined;
-    // 排序用归一秒值(老数据没有 timeMs 时退回 time): 客户端单位不一时 time 之间不可比
-    return collection.find({ expireAt: { $gt: new Date() } }).sort({ timeMs: -1, time: -1 }).toArray();
-}
-
 async function handleQueryAllRoom(_req: express.Request, res: express.Response): Promise<void> {
     try {
-        const docs = await queryStations();
-        if (!docs) {
+        const rooms = await commandQueryAllRooms();
+        if (!rooms) {
             res.status(200).send({ status: 'failed', data: DB_DISABLED });
             return;
         }
-        res.status(200).send({ status: 'success', data: docs.map(toRoomView) });
+        res.status(200).send({ status: 'success', data: rooms });
     } catch (e) {
         console.log(e);
         res.status(500).send({ status: 'failed', data: '内部错误' });

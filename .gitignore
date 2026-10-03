@@ -1,6 +1,7 @@
 node_modules/
 dist/
 cache/
+/data/
 .env
 *.log
 test_result/

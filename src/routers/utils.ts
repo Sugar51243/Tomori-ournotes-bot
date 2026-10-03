@@ -1,15 +1,9 @@
-import type { FuzzySearchResult } from '../fuzzySearch';
+import type { FuzzySearchResult } from '../search/fuzzySearch';
+import type { EntityInput } from '../search/fuzzySearch';
 
-export function isInteger(char: string): boolean {
-    const regex = /^(0|[1-9]\d*)$/;
-    return regex.test(char);
-}
-
-/**
- * 实体查询输入: 字符串(纯数字按 ID 直查, 其它文本走模糊搜索)或现成的模糊搜索结果。
- * 各 commandXxx 都按这个约定处理输入。
- */
-export type EntityInput = string | FuzzySearchResult;
+// 定义已迁至 search/fuzzySearch(搜索层与路由层共用), 这里保留 re-export 兼容既有导入。
+export { isInteger } from '../search/fuzzySearch';
+export type { EntityInput };
 
 /**
  * 统一解析实体端点的查询输入(**简化传参**: 一个字段就能查)。
@@ -41,6 +35,7 @@ function imageBufferToBase64(buffer: Buffer): string {
     return buffer.toString('base64');
 }
 
+/** 出图结果统一编码为 tsugu 协议结构: Buffer→base64, 字符串原样 */
 export function listToBase64(list: Array<Buffer | string>): Array<{ type: 'string' | 'base64', string: string }> {
     if (!list) {
         return [];

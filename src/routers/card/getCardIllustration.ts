@@ -1,13 +1,9 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { isInteger, listToBase64, pickEntityInput } from '../utils';
+import { fallbackChain, isServerInput } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { imageBuffer, cardFullArtUrl, supportCardFullUrl } from '../../data/assets';
-import { isMemberCard, CardKind } from '../../search';
-import { fallbackChain, isServerInput, Server, withServer } from '../../types/Server';
-import { Card } from '../../types/Card';
-import { SupportCard } from '../../types/SupportCard';
-import { assetCacheKey } from '../../data/assets';
+import { commandGetCardIllustration } from '../../features/card/getCardIllustration';
 
 /**
  * 卡面原图(无画布加工): 支持成员卡(角色卡)与支援卡; 单服回退, 取回退链上第一个收录该卡的服。
@@ -44,39 +40,5 @@ router.post(
         }
     }
 );
-
-export interface CardIllustrationQuery {
-    cardId: number;
-    cardType?: CardKind;
-}
-
-export async function commandGetCardIllustration(servers: Server[], query: CardIllustrationQuery): Promise<Array<Buffer | string>> {
-    const { cardId, cardType = 'auto' } = query;
-    // 原图直出, 无法在一张图里表达多服差异 -> 沿回退链取第一个收录该卡的区域
-    const kinds: Array<'member' | 'support'> = cardType === 'auto' ? ['member', 'support'] : [cardType];
-    let card: Card | SupportCard | undefined;
-    for (const server of servers) {
-        for (const kind of kinds) {
-            const candidate = kind === 'support'
-                ? withServer(new SupportCard(cardId), server)
-                : withServer(new Card(cardId), server);
-            await candidate.init();
-            if (candidate.isExist) { card = candidate; break; }
-        }
-        if (card) break;
-    }
-    if (!card) {
-        return ['错误: 该卡不存在'];
-    }
-    const url = isMemberCard(card)
-        ? cardFullArtUrl(card.server, card.cardId)
-        : supportCardFullUrl(card.server, card.assetId);
-    const key = assetCacheKey(card.server, isMemberCard(card) ? `card/${card.assetId}_full.png` : `support/${card.assetId}_full.png`);
-    const art = await imageBuffer(url, key);
-    if (!art) {
-        return ['错误: 卡面图片获取失败'];
-    }
-    return [art];
-}
 
 export { router as getCardIllustrationRouter };

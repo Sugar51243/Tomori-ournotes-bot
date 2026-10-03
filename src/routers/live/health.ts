@@ -1,8 +1,8 @@
 import express from 'express';
 import { config } from '../../config';
-import { getVersionManifest } from '../../data/masterdata/client';
-import { SERVER_LIST, Server, serverProfile } from '../../types/Server';
-import { gatewayConfigured } from '../../data/player/client';
+import { getVersionManifest } from '../../db/adapter';
+import { SERVER_LIST, Server, serverProfile } from '../../features/types/Server';
+import { gatewayConfigured } from '../../upstream/adapter';
 
 /**
  * 健康检查接口。

@@ -1,10 +1,10 @@
 import express from 'express';
 import { config } from '../../config';
 import { logger } from '../../logger';
-import { SERVER_LIST, Server } from '../../types/Server';
-import { Announcement } from '../../types/Announcement';
-import { subscribe } from '../../data/announcements/watcher';
-import { drawAnnouncementDetail } from '../../view/announcement/announcementDetail';
+import { SERVER_LIST, Server } from '../../features/types/Server';
+import { Announcement } from '../../features/types/Announcement';
+import { subscribe } from '../../tasks/announcements/watcher';
+import { drawAnnouncementDetail } from '../../render/view/announcement/announcementDetail';
 import { listToBase64 } from '../utils';
 
 /**

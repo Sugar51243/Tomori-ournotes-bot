@@ -1,8 +1,8 @@
 import express from 'express';
 import { config } from './config';
 import { logger } from './logger';
-import { registerFonts } from './components/fonts';
-import { SERVER_LIST } from './types/Server';
+import { registerFonts } from './render/component/fonts';
+import { SERVER_LIST } from './features/types/Server';
 import { searchSongRouter } from './routers/song/searchSong';
 import { songMetaRouter } from './routers/song/songMeta';
 import { songChartRouter } from './routers/song/songChart';
@@ -30,9 +30,9 @@ import { eventRankingRouter } from './routers/event/eventRanking';
 import { eventRecommendRouter } from './routers/event/eventRecommend';
 import { cutoffRouter } from './routers/event/cutoffRoute';
 import { searchBandRouter } from './routers/band/searchBand';
-import { startCutoffRecorder } from './data/cutoff/recorder';
+import { startCutoffRecorder } from './tasks/cutoff/recorder';
+import { initCutoffStore } from './db/adapter';
 import { disabledRouter } from './routers/disabled';
-import { renderCacheMiddleware } from './routers/renderCache';
 import { apiHealthRouter } from './routers/live/health';
 
 const app = express();
@@ -41,8 +41,6 @@ app.use(express.json({ limit: '2mb' }));
 // 接口状态查询
 app.use('/health', apiHealthRouter);
 
-// 渲染结果缓存: 只作用于确定性的出图/数据端点(见 renderCache.ts 的白名单)
-//app.use(renderCacheMiddleware);
 
 /** 业务接口  */
 // 模糊搜索
@@ -122,8 +120,10 @@ app.use((err: Error, _req: express.Request, res: express.Response, next: express
 registerFonts();
 
 
-app.listen(config.port, () => {
-    logger('expressMainThread', `listening on port ${config.port} (defaultServer=${config.defaultServer}, servers=${SERVER_LIST.join('/')})`);
+app.listen(config.port, config.location, () => {
+    logger('expressMainThread', `listening on ${config.location}:${config.port} (defaultServer=${config.defaultServer}, servers=${SERVER_LIST.join('/')})`);
+    // 榜线历史存储初始化(MySQL → SQLite → 内存)与 Mongo 旧数据迁移, 后台进行不阻塞
+    void initCutoffStore().catch(e => logger('cutoff', `store init failed: ${e instanceof Error ? e.message : e}`));
     // 榜线历史常驻采样(上游没有历史接口, 得自己按小时攒)
     startCutoffRecorder();
 });

@@ -1,12 +1,9 @@
 import express from 'express';
 import { body } from 'express-validator';
 import { listToBase64 } from '../utils';
-import { isServerInput, pickServers, SERVER_LIST, Server, withServer } from '../../types/Server';
+import { isServerInput, pickServers } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { storeFor } from '../../data/region';
-import { Song } from '../../types/Song';
-import { getMusicData, rankCharts } from '../../data/musicData/client';
-import { drawSongMetaList } from '../../view/song/songMetaList';
+import { commandSongMeta } from '../../features/song/songMeta';
 
 /**
  * 歌曲meta · 效率排行(参考站点「歌曲meta」的算法, 数据与其同源)。
@@ -37,43 +34,5 @@ router.post(
         }
     }
 );
-
-export interface SongMetaQuery {
-    compress?: boolean;
-}
-
-export async function commandSongMeta(servers: Server[], query: SongMetaQuery = {}): Promise<Array<Buffer | string>> {
-    const { compress = false } = query;
-    const bodyServer = servers[0];
-    const data = await getMusicData();
-    if (!data) return ['错误: 谱面效率数据暂不可用, 请稍后再试'];
-
-    const battle = rankCharts(data, 'battle', 15);
-    const free = rankCharts(data, 'free', 15);
-
-    // 曲目本体(标题/乐团/封面)按所选服取: 港澳台 -> 日服 -> 第一个收录的服
-    const ids = [...new Set([...battle, ...free].map(r => r.musicId))];
-    const songs = new Map<number, Song>();
-    for (const id of ids) {
-        const song = withServer(new Song(id), await firstOwner(id, servers));
-        await song.init();
-        if (song.isExist) songs.set(id, song);
-    }
-
-    return drawSongMetaList(bodyServer, battle, free, songs, compress);
-}
-
-/** 该曲本体取哪个服的数据: 输入的服按顺序优先, 其次港澳台 -> 日服 -> 其余 */
-async function firstOwner(songId: number, servers: Server[]): Promise<Server> {
-    const ordered = [
-        ...servers,
-        ...SERVER_LIST.filter(s => (s === 'tw' || s === 'jp') && !servers.includes(s)),
-        ...SERVER_LIST.filter(s => s !== 'tw' && s !== 'jp' && !servers.includes(s))
-    ];
-    for (const server of ordered) {
-        if (await storeFor(server).songById(songId)) return server;
-    }
-    return servers[0];
-}
 
 export { router as songMetaRouter };

@@ -9,6 +9,11 @@ function stamp(): string {
     return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/**
+ * 统一日志出口: 按 LOG_LEVEL 过滤后打印一行带时间戳的日志。
+ * @param type 日志类别(如 'app' / 'cutoff' / 'expressMainThread'); 类别名里含 error/warn 时自动升到对应等级
+ * @param message 日志内容; Error 对象会打印堆栈
+ */
 export function logger(type: string, message: unknown): void {
     let level = 'info';
     if (type.includes('Error') || type.includes('error')) level = 'error';

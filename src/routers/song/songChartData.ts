@@ -1,15 +1,10 @@
 import express from 'express';
 import { body } from 'express-validator';
-import { isInteger, pickEntityInput } from '../utils';
+import { pickEntityInput } from '../utils';
+import { fallbackChain, isServerInput } from '../../features/types/Server';
 import { middleware } from '../middleware';
-import { Song } from '../../types/Song';
-import { fallbackChain, isServerInput, Server, withServer } from '../../types/Server';
-import { firstServerHavingSong } from '../../data/serverInfo';
-import { isFuzzySearchResult } from '../../fuzzySearch';
-import { getChartManifest, getChartNotes, difficultyIdToName } from '../../chart/client';
-import { parseNnNotes, mirrorChart } from '../../chart/parse';
-import { simplifyChart } from '../../chart/simplify';
-import { findSongMatches } from './searchSong';
+import { isFuzzySearchResult } from '../../search/fuzzySearch';
+import { commandSongChartData, resolveSongChartTarget } from '../../features/song/songChartData';
 
 /**
  * 谱面数据端点(纯 JSON, 不 base64):
@@ -41,31 +36,12 @@ router.post(
             return res.status(400).send({ status: 'failed', data: '参数错误', error: [{ msg: '需要提供查询输入: id / songId / text / fuzzySearchResult 之一' }] });
         }
         try {
-            const servers = fallbackChain(req.body);
-
-            // 解析成歌曲 ID: 数字直用; 文本走模糊搜索(唯一命中才取)
-            let songId: number;
-            if (typeof input === 'string' && isInteger(input)) {
-                songId = parseInt(input, 10);
-            } else {
-                const hit = await findSongMatches(servers, input);
-                if ('error' in hit) {
-                    return res.send({ status: 'failed', data: hit.error });
-                }
-                if (hit.songs.length > 1) {
-                    const names = hit.songs.slice(0, 5).map(s => `${s.songId} ${s.musicTitle}`).join(' / ');
-                    return res.send({ status: 'failed', data: `错误: 匹配到多首歌曲, 请用 songId 精确指定: ${names}` });
-                }
-                songId = hit.songs[0].songId;
+            const target = await resolveSongChartTarget(fallbackChain(req.body), input);
+            if (!target.ok) {
+                return res.send({ status: 'failed', data: target.message });
             }
-
-            // 单服回退: 沿回退链取第一个收录该曲的服
-            const server = await firstServerHavingSong(songId, servers);
-            if (!server) {
-                return res.send({ status: 'failed', data: '错误: 歌曲不存在' });
-            }
-            const result = await commandSongChartData(server, {
-                songId,
+            const result = await commandSongChartData(target.server, {
+                songId: target.songId,
                 difficultyId: req.body.difficultyId ?? 3,
                 mirror: req.body.mirror ?? false,
                 format: req.body.format ?? 'simple'
@@ -82,63 +58,5 @@ router.post(
         }
     }
 );
-
-export interface ChartDataQuery {
-    songId: number;
-    difficultyId: number;
-    mirror: boolean;
-    format: string;
-}
-
-export async function commandSongChartData(server: Server, query: ChartDataQuery) {
-    const { songId, difficultyId, mirror, format } = query;
-    const song = withServer(new Song(songId), server);
-    await song.init();
-    if (!song.isExist) {
-        throw new Error('错误: 歌曲不存在');
-    }
-    const difficultyName = difficultyIdToName(difficultyId);
-    if (!difficultyName || !song.difficulty[difficultyId]) {
-        throw new Error('错误: 难度不存在');
-    }
-    const diff = song.difficulty[difficultyId];
-
-    const manifest = await getChartManifest(songId, difficultyName);
-    const raw = await getChartNotes(songId, difficultyId);
-
-    let chart = parseNnNotes(raw, {
-        musicId: songId,
-        difficulty: difficultyId,
-        title: song.musicTitle || manifest.chart.title,
-        level: diff.playLevel || manifest.chart.level,
-        durationMs: manifest.chart.durationMs,
-        fullComboCount: manifest.chart.fullComboCount
-    });
-    if (mirror) {
-        chart = mirrorChart(chart);
-    }
-
-    const meta = {
-        musicId: songId,
-        difficulty: difficultyName,
-        level: chart.level,
-        title: chart.title,
-        durationMs: chart.durationMs,
-        laneCount: chart.laneCount,
-        counts: chart.counts,
-        bpm: chart.bpm,
-        feverCount: chart.fever.length,
-        slideCount: chart.slides.length
-    };
-
-    const out: Record<string, unknown> = { meta };
-    if (format === 'raw' || format === 'both') {
-        out.raw = raw;
-    }
-    if (format === 'simple' || format === 'both') {
-        out.simple = simplifyChart(chart);
-    }
-    return out;
-}
 
 export { router as songChartDataRouter };

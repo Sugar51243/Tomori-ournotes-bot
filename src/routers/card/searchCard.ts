@@ -1,4 +1,5 @@
-import { createCardRouter, commandCard } from './cardRoute';
+import { createCardRouter } from './cardRoute';
+import { commandCard } from '../../features/card/cardRoute';
 
 /**
  * 查卡(整合): 角色卡(成员卡)与支援卡一起查询。

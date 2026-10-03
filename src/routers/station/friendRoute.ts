@@ -2,10 +2,9 @@ import express from 'express';
 import { body } from 'express-validator';
 import { listToBase64 } from '../utils';
 import { middleware } from '../middleware';
-import { friendsCollection } from '../../data/mongo';
-import { drawFriendList } from '../../view/station/friendList';
-import { isFriendServer, normalizeServer, defaultServer } from '../../types/Server';
-import { FriendDoc } from '../../types/Friend';
+import { deleteFriend, upsertFriend } from '../../db/adapter';
+import { isFriendServer, normalizeServer, defaultServer } from '../../features/types/Server';
+import { commandFriendList, DB_DISABLED } from '../../features/friend/friendRoute';
 
 /**
  * 交友区(tsugu 无此功能, 自定义端点):
@@ -14,7 +13,6 @@ import { FriendDoc } from '../../types/Friend';
  * - /friend/list    交友列表图
  * 数据库未配置/连不上时统一返回域内错误, 不 500。
  */
-const DB_DISABLED = '错误: 服务器未启用数据库';
 
 export const friendUploadRouter = express.Router();
 friendUploadRouter.post(
@@ -30,20 +28,16 @@ friendUploadRouter.post(
     async (req: express.Request, res: express.Response) => {
         const { userId, userName, avatarUrl, playerId, server } = req.body;
         try {
-            const collection = await friendsCollection().catch(() => undefined);
-            if (!collection) {
+            const result = await upsertFriend({
+                userId,
+                userName,
+                avatarUrl,
+                playerId,
+                server: normalizeServer(server) ?? defaultServer()
+            });
+            if (result === 'db_disabled') {
                 return res.status(200).send({ status: 'failed', data: DB_DISABLED });
             }
-            const now = new Date();
-            await collection.updateOne(
-                { userId },
-                {
-                    // 归一化写入: 新记录不再存 'hk-tw-mo' 别名(读取侧仍兼容旧数据)
-                    $set: { userName, avatarUrl: avatarUrl || undefined, playerId, server: normalizeServer(server) ?? defaultServer(), updatedAt: now },
-                    $setOnInsert: { userId, createdAt: now }
-                },
-                { upsert: true }
-            );
             res.status(200).send({ status: 'success', data: '已记录你的交友信息' });
         } catch (e) {
             console.log(e);
@@ -52,6 +46,7 @@ friendUploadRouter.post(
     }
 );
 
+/** 删除交友信息的路由(按 QQ 号) */
 export const friendDeleteRouter = express.Router();
 friendDeleteRouter.post(
     '/',
@@ -60,12 +55,11 @@ friendDeleteRouter.post(
     async (req: express.Request, res: express.Response) => {
         const { userId } = req.body;
         try {
-            const collection = await friendsCollection().catch(() => undefined);
-            if (!collection) {
+            const deleted = await deleteFriend(userId);
+            if (deleted === undefined) {
                 return res.status(200).send({ status: 'failed', data: DB_DISABLED });
             }
-            const result = await collection.deleteOne({ userId });
-            res.status(200).send({ status: 'success', data: result.deletedCount > 0 ? '已删除你的交友信息' : '没有找到你的交友信息' });
+            res.status(200).send({ status: 'success', data: deleted > 0 ? '已删除你的交友信息' : '没有找到你的交友信息' });
         } catch (e) {
             console.log(e);
             res.status(500).send({ status: 'failed', data: '内部错误' });
@@ -73,6 +67,7 @@ friendDeleteRouter.post(
     }
 );
 
+/** 交友列表图路由 */
 export const friendListRouter = express.Router();
 friendListRouter.post(
     '/',
@@ -88,19 +83,3 @@ friendListRouter.post(
         }
     }
 );
-
-export interface FriendListQuery {
-    compress?: boolean;
-}
-
-export async function commandFriendList(query: FriendListQuery = {}): Promise<Array<Buffer | string>> {
-    const collection = await friendsCollection().catch(() => undefined);
-    if (!collection) {
-        return [DB_DISABLED];
-    }
-    const friends = await collection.find({}).sort({ updatedAt: -1 }).toArray();
-    if (friends.length === 0) {
-        return ['交友列表为空'];
-    }
-    return drawFriendList(friends as FriendDoc[], !!query.compress);
-}

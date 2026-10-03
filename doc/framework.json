@@ -1,0 +1,502 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Tomori 服务端框架",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": "framework.html",
+    "views": [
+      {
+        "id": "request-path",
+        "label": "请求主路径",
+        "focus": [
+          "caller",
+          "router",
+          "feature",
+          "render"
+        ],
+        "note": "请求从路由层进入, 经功能实现与数据存取, 由渲染层出图再编码返回"
+      },
+      {
+        "id": "source-fallback",
+        "label": "数据源回退",
+        "focus": [
+          "uplink",
+          "bdon",
+          "yume",
+          "disk"
+        ],
+        "note": "主源 → 备用源 → bdon.moe 兜底; 任一源失败(含 404)即回退, 全败报「上游崩溃」"
+      },
+      {
+        "id": "databases",
+        "label": "两个数据库",
+        "focus": [
+          "dblayer",
+          "mongo",
+          "cutoffdb"
+        ],
+        "note": "社区数据常驻 MongoDB; 榜线历史走 MySQL/SQLite 双后端"
+      },
+      {
+        "id": "data-access",
+        "label": "数据存取层",
+        "focus": [
+          "feature",
+          "search",
+          "dblayer",
+          "uplink"
+        ],
+        "note": "功能层经模糊搜索与两个 adapter 取数, 全部经 adapter 做格式转换"
+      },
+      {
+        "id": "background-tasks",
+        "label": "后台任务",
+        "focus": [
+          "tasks",
+          "uplink",
+          "router",
+          "cutoffdb"
+        ],
+        "note": "榜线每小时采样拉取写库; 公告轮询经 SSE 推送"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "调用方",
+      "sublabel": "机器人 / 客户端",
+      "pos": [
+        20,
+        80
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "路由层 routers/",
+      "sublabel": "app.ts · 校验 / 解析",
+      "pos": [
+        190,
+        80
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "feature",
+      "type": "backend",
+      "label": "功能层 features/",
+      "sublabel": "各域 command 实现",
+      "pos": [
+        370,
+        80
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "render",
+      "type": "backend",
+      "label": "渲染层 render/",
+      "sublabel": "view/component · canvas",
+      "pos": [
+        550,
+        80
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "tasks",
+      "type": "backend",
+      "label": "后台任务 tasks/",
+      "sublabel": "榜线采样 · 公告轮询",
+      "pos": [
+        890,
+        80
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "search",
+      "type": "backend",
+      "label": "模糊搜索",
+      "sublabel": "search/ · fuzzyIndex",
+      "pos": [
+        20,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "mongo",
+      "type": "database",
+      "label": "MongoDB",
+      "sublabel": "交友/车站/关键词",
+      "pos": [
+        144,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "dblayer",
+      "type": "backend",
+      "label": "数据库管理器",
+      "sublabel": "db/adapter",
+      "pos": [
+        268,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "cutoffdb",
+      "type": "database",
+      "label": "榜线历史库",
+      "sublabel": "MySQL / SQLite",
+      "pos": [
+        392,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "disk",
+      "type": "database",
+      "label": "磁盘缓存",
+      "sublabel": "ETag / stale",
+      "pos": [
+        516,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "uplink",
+      "type": "backend",
+      "label": "上游适配器",
+      "sublabel": "upstream/adapter",
+      "pos": [
+        640,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "bdon",
+      "type": "external",
+      "label": "bdon.moe",
+      "sublabel": "主源 · 全部角色",
+      "pos": [
+        764,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "yume",
+      "type": "external",
+      "label": "Project Yume",
+      "sublabel": "备用源 · 表/图",
+      "pos": [
+        888,
+        260
+      ],
+      "size": [
+        100,
+        60
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "request",
+      "from": "caller",
+      "to": "router"
+    },
+    {
+      "id": "response",
+      "from": "router",
+      "to": "caller",
+      "label": "响应（listToBase64）",
+      "fromSide": "top",
+      "toSide": "top",
+      "labelAt": [
+        176,
+        240
+      ]
+    },
+    {
+      "id": "invoke",
+      "from": "router",
+      "to": "feature",
+      "label": "调用命令实现",
+      "labelDy": 56
+    },
+    {
+      "id": "feature-search",
+      "from": "feature",
+      "to": "search",
+      "label": "文本 → 模糊匹配结果",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "feature-db",
+      "from": "feature",
+      "to": "dblayer",
+      "label": "实体装载 / 榜单存取",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        360,
+        232
+      ]
+    },
+    {
+      "id": "feature-upstream",
+      "from": "feature",
+      "to": "uplink",
+      "label": "排行 / 公告 / 账号查询",
+      "fromSide": "bottom",
+      "via": [
+        [
+          445,
+          212
+        ],
+        [
+          628,
+          212
+        ],
+        [
+          628,
+          290
+        ],
+        [
+          640,
+          290
+        ]
+      ],
+      "toSide": "left"
+    },
+    {
+      "id": "feature-render",
+      "from": "feature",
+      "to": "render",
+      "label": "drawXxx() → Buffer[]",
+      "labelDy": -38
+    },
+    {
+      "id": "db-mongo",
+      "from": "dblayer",
+      "to": "mongo",
+      "label": "社区读写",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        206,
+        336
+      ]
+    },
+    {
+      "id": "db-cutoff",
+      "from": "dblayer",
+      "to": "cutoffdb",
+      "label": "榜线采样存取",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        330,
+        336
+      ]
+    },
+    {
+      "id": "upstream-disk",
+      "from": "uplink",
+      "to": "disk",
+      "label": "缓存读写（源前缀键）",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        578,
+        336
+      ]
+    },
+    {
+      "id": "upstream-bdon",
+      "from": "uplink",
+      "to": "bdon",
+      "label": "主源 & 兜底 bdon.moe",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "via": [
+        [
+          752,
+          290
+        ],
+        [
+          752,
+          212
+        ],
+        [
+          814,
+          212
+        ]
+      ],
+      "toSide": "top",
+      "labelAt": [
+        783,
+        212
+      ]
+    },
+    {
+      "id": "upstream-yume",
+      "from": "uplink",
+      "to": "yume",
+      "label": "失败回退（BACKUP_SOURCE）",
+      "fromSide": "top",
+      "via": [
+        [
+          690,
+          170
+        ],
+        [
+          938,
+          170
+        ]
+      ],
+      "toSide": "top",
+      "labelAt": [
+        814,
+        170
+      ]
+    },
+    {
+      "id": "yume-bdon",
+      "from": "yume",
+      "to": "bdon",
+      "label": "再失败 → 兜底 / 报「上游崩溃」",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        876,
+        336
+      ]
+    },
+    {
+      "id": "task-pull",
+      "from": "tasks",
+      "to": "uplink",
+      "label": "采样榜线 · 轮询公告",
+      "fromSide": "right",
+      "via": [
+        [
+          1048,
+          112
+        ],
+        [
+          1048,
+          380
+        ],
+        [
+          690,
+          380
+        ]
+      ],
+      "toSide": "bottom",
+      "labelAt": [
+        860,
+        380
+      ]
+    },
+    {
+      "id": "task-sse",
+      "from": "tasks",
+      "to": "router",
+      "label": "SSE 推送（新公告）",
+      "fromSide": "top",
+      "via": [
+        [
+          965,
+          30
+        ],
+        [
+          265,
+          30
+        ]
+      ],
+      "toSide": "top",
+      "labelAt": [
+        560,
+        17
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "数据源回退机制",
+      "items": [
+        "主源 DATA_SOURCE → 备用源 BACKUP_SOURCE → bdon.moe 兜底（去重）",
+        "任一源失败（含 404）即回退；全败时 4xx 原样抛出，否则报「上游崩溃」",
+        "Project Yume 只承担 master 表与图片，其余角色由 bdon 承担"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "两个数据库",
+      "items": [
+        "MongoDB：交友 / 车站 / 关键词（ENABLE_DB 门控），兼作榜线旧数据迁移源",
+        "榜线历史库：MySQL 优先（自动建库）→ SQLite 缓冲（恢复自动回灌）→ 内存兜底"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "请求与后台",
+      "items": [
+        "路由只做校验 / 解析 / 编码；功能层经 search 与两个 adapter 取数，渲染层出 PNG",
+        "后台任务：榜线每小时采样 + 查询触发写库；公告轮询经 SSE 推送；上游响应/表/图走磁盘缓存"
+      ]
+    }
+  ]
+}
