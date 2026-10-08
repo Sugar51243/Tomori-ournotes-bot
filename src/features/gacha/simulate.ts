@@ -109,9 +109,13 @@ async function drawOnce(gacha: Gacha): Promise<GachaDrawResult> {
  */
 export async function simulateGacha(gacha: Gacha, times: number): Promise<GachaDrawResult[]> {
     const results: GachaDrawResult[] = [];
+    let had_SR = false;
     for (let i = 0; i < times; i++) {
         let result = await drawOnce(gacha);
-        if (i % 10 === 9 && (result.kind === 'item' || result.rarity < 3)) {
+        if (result.rarity >= 3) {
+            had_SR = true;
+        }
+        if (i % 10 === 9 && (result.kind === 'item' || result.rarity < 3) && !had_SR) {
             const upgraded = await drawUpgraded(gacha);
             if (upgraded) result = upgraded;
         }
