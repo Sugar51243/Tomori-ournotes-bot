@@ -1,8 +1,9 @@
 import { AppError } from '../http/errors';
-import { reqStr, reqInt, optInt, reqArr, reqEnum } from '../http/validate';
+import { reqStr, optStr, reqInt, optInt, reqArr, reqEnum } from '../http/validate';
 import { isCutoffTier, normalizeServer, type CutoffTier } from '../constants';
 import type { OpTable } from './opRouter';
 import * as repo from '../db/repos/cutoff';
+import * as legacyCutoffs from '../db/repos/legacyCutoffs';
 
 /**
  * 榜线模块。写入方是 bot(常驻采样 + SQLite 回灌), 读取方是 bot(出图)与 web(榜线页)。
@@ -90,5 +91,15 @@ export const cutoffOps: OpTable = {
         const eventId = reqInt(params, 'eventId', { min: 0 });
         const tiers = optTiers(params);
         return repo.loadCutoffSeries(server as Parameters<typeof repo.loadCutoffSeries>[0], eventId, tiers);
+    },
+
+    /** 旧 Mongo `cutoffs` 集合的分页扫描(bot 一次性迁移用; 只读) */
+    legacyScan: async params => {
+        const afterId = optStr(params, 'afterId', { max: 64 });
+        if (afterId !== undefined && !/^[0-9a-fA-F]{24}$/.test(afterId)) {
+            throw AppError.validation('afterId 必须是 ObjectId 十六进制串');
+        }
+        const limit = Math.min(optInt(params, 'limit', { min: 1, def: 1000 }) ?? 1000, MAX_SCAN_LIMIT);
+        return legacyCutoffs.scan(afterId, limit);
     },
 };

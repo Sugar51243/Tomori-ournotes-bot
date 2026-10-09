@@ -4,11 +4,11 @@
  * 磁盘原语: 对 DiskCache 单例的透传(读取/写入/触碰/新鲜度判断/单飞/版本清理, 行为逐字一致)。
  * 静态数据: master 表 / 区域上下文 / 派生关系 / 技能 / 贴纸 / 多服信息行 / 图片缓存,
  *           读表时的「行 -> 领域对象」格式转换在各自模块内完成, 原始行不对外泄漏。
- * 社区数据: Mongo 集合(车站/交友)统一在此收口, 路由不再直连驱动。
+ * 社区数据: 车站/交友/绑定统一走「数据库 API」(database/ 项目)并在此收口, 路由不再接触存储。
  */
 import { config } from '../config';
 import { diskCache } from './cache';
-import { bindingsCollection, dbConfigured, friendsCollection, stationsCollection } from './mongo';
+import { callDbApiSoft, dbApiConfigured } from './apiClient';
 import type { FriendDoc } from '../features/types/Friend';
 import type { StationDoc } from '../features/types/Station';
 import type { FriendServer } from '../features/types/Server';
@@ -59,10 +59,17 @@ export * from './skills';
 export * from './stamps';
 export * from './serverInfo';
 
-// ---- 社区数据(Mongo) ----
+// ---- 社区数据(经数据库 API) ----
 
-export { dbConfigured };
+/** 社区功能是否配置就绪(ENABLE_DB 开关 + 数据库 API 地址); 未就绪时相关命令报"服务器未启用数据库" */
+export function dbConfigured(): boolean {
+    return config.enableDb && dbApiConfigured();
+}
 
+/**
+ * 连接层的"没配/连不上"折叠成 undefined(与旧的 `.catch(() => undefined)` → db_disabled 一致);
+ * 业务错误(冲突、重复)照旧抛出。
+ */
 export interface StationRoomFields {
     number: number;
     rawMessage: string;
@@ -70,42 +77,31 @@ export interface StationRoomFields {
     userId: string;
     userName: string;
     time: number;
-    /** 归一秒值(只给出图/排序用) */
+    /** 归一秒值(只给出图/排序用); expireAt 由数据库 API 按统一 TTL 计算 */
     timeMs: number;
     avatarUrl?: string;
 }
 
-/** 上传/刷新房间号(同房号 upsert); 集合不可得时返回 db_disabled, 写入失败照旧抛出 */
+/** 上传/刷新房间号(同房号 upsert); 连不上返回 db_disabled, 写入失败照旧抛出 */
 export async function submitStationRoom(fields: StationRoomFields): Promise<'ok' | 'db_disabled'> {
-    const collection = await stationsCollection().catch(() => undefined);
-    if (!collection) return 'db_disabled';
-    const now = new Date();
-    const doc: Record<string, unknown> = {
+    const res = await callDbApiSoft<{ ok: true }>('stations', 'submit', {
         number: fields.number,
         rawMessage: fields.rawMessage,
         source: fields.source,
         userId: fields.userId,
         userName: fields.userName,
-        // time 原样存(对外 JSON 与之前完全一致); timeMs 是归一秒值, 只给出图与排序用
         time: fields.time,
         timeMs: fields.timeMs,
-        expireAt: new Date(now.getTime() + config.stationTtlS * 1000)
-    };
-    if (fields.avatarUrl) doc.avatarUrl = fields.avatarUrl;
-    await collection.updateOne(
-        { number: fields.number },
-        { $set: doc, $setOnInsert: { createdAt: now } },
-        { upsert: true }
-    );
-    return 'ok';
+        ...(fields.avatarUrl ? { avatarUrl: fields.avatarUrl } : {}),
+        // bot 语义: 同房号谁提交都覆盖(web 侧走 claim=true 的归属检查)
+        claim: false,
+    });
+    return res === undefined ? 'db_disabled' : 'ok';
 }
 
-/** 未过期房间文档: 按归一秒值倒序; 集合不可得时返回 undefined */
+/** 未过期房间文档: 按归一秒值倒序; 连不上返回 undefined */
 export async function listStationDocs(): Promise<StationDoc[] | undefined> {
-    const collection = await stationsCollection().catch(() => undefined);
-    if (!collection) return undefined;
-    // 排序用归一秒值(老数据没有 timeMs 时退回 time): 客户端单位不一时 time 之间不可比
-    return collection.find({ expireAt: { $gt: new Date() } }).sort({ timeMs: -1, time: -1 }).toArray();
+    return callDbApiSoft<StationDoc[]>('stations', 'listActive');
 }
 
 export interface FriendFields {
@@ -118,37 +114,28 @@ export interface FriendFields {
 
 /** 新增/更新交友信息(按 userId upsert, 一人一条) */
 export async function upsertFriend(fields: FriendFields): Promise<'ok' | 'db_disabled'> {
-    const collection = await friendsCollection().catch(() => undefined);
-    if (!collection) return 'db_disabled';
-    const now = new Date();
-    await collection.updateOne(
-        { userId: fields.userId },
-        {
-            // 归一化写入: 新记录不再存 'hk-tw-mo' 别名(读取侧仍兼容旧数据)
-            $set: { userName: fields.userName, avatarUrl: fields.avatarUrl || undefined, playerId: fields.playerId, server: fields.server, updatedAt: now },
-            $setOnInsert: { userId: fields.userId, createdAt: now }
-        },
-        { upsert: true }
-    );
-    return 'ok';
+    const res = await callDbApiSoft<{ ok: true }>('friends', 'upsert', {
+        userId: fields.userId,
+        userName: fields.userName,
+        ...(fields.avatarUrl ? { avatarUrl: fields.avatarUrl } : {}),
+        playerId: fields.playerId,
+        server: fields.server,
+    });
+    return res === undefined ? 'db_disabled' : 'ok';
 }
 
-/** 按 userId 删除; 返回删除条数, 集合不可得时返回 undefined */
+/** 按 userId 删除; 返回删除条数, 连不上返回 undefined */
 export async function deleteFriend(userId: string): Promise<number | undefined> {
-    const collection = await friendsCollection().catch(() => undefined);
-    if (!collection) return undefined;
-    const result = await collection.deleteOne({ userId });
-    return result.deletedCount;
+    const res = await callDbApiSoft<{ removed: number }>('friends', 'remove', { userId });
+    return res?.removed;
 }
 
-/** 交友列表(updatedAt 倒序); 集合不可得时返回 undefined */
+/** 交友列表(updatedAt 倒序); 连不上返回 undefined */
 export async function listFriendDocs(): Promise<FriendDoc[] | undefined> {
-    const collection = await friendsCollection().catch(() => undefined);
-    if (!collection) return undefined;
-    return (await collection.find({}).sort({ updatedAt: -1 }).toArray()) as FriendDoc[];
+    return callDbApiSoft<FriendDoc[]>('friends', 'list');
 }
 
-// ---- 玩家绑定(Mongo; 一个 QQ 可绑多个账号) ----
+// ---- 玩家绑定(一个 QQ 可绑多个账号) ----
 
 export interface BindingFields {
     userId: string;
@@ -167,71 +154,41 @@ export type BindingLookup =
 
 /**
  * 新增/更新一条绑定(按 userId+accountId upsert)。
- * 该用户的**第一个**绑定自动设为默认; 已存在但没有默认的(老数据/异常)也顺手补一个。
+ * 该用户的**第一个**绑定自动设为默认; 已存在但没有默认的(老数据/异常)也顺手补一个
+ * —— 默认项晋升逻辑在服务端整段执行。
  */
 export async function addBinding(fields: BindingFields): Promise<'ok' | 'db_disabled'> {
-    const collection = await bindingsCollection().catch(() => undefined);
-    if (!collection) return 'db_disabled';
-    const now = new Date();
-    const existing = await collection.countDocuments({ userId: fields.userId });
-    const hasDefault = await collection.countDocuments({ userId: fields.userId, isDefault: true });
-    await collection.updateOne(
-        { userId: fields.userId, accountId: fields.accountId },
-        {
-            $set: {
-                playerId: fields.playerId,
-                server: fields.server,
-                label: fields.label || undefined,
-                updatedAt: now
-            },
-            $setOnInsert: {
-                userId: fields.userId,
-                accountId: fields.accountId,
-                isDefault: existing === 0 || hasDefault === 0,
-                createdAt: now
-            }
-        },
-        { upsert: true }
-    );
-    return 'ok';
+    const res = await callDbApiSoft<{ ok: true }>('bindings', 'add', {
+        userId: fields.userId,
+        accountId: fields.accountId,
+        playerId: fields.playerId,
+        server: fields.server,
+        ...(fields.label ? { label: fields.label } : {}),
+    });
+    return res === undefined ? 'db_disabled' : 'ok';
 }
 
 /** 某用户的全部绑定: 默认在前, 其余按创建时间 */
 export async function listBindings(userId: string): Promise<BindingDoc[] | undefined> {
-    const collection = await bindingsCollection().catch(() => undefined);
-    if (!collection) return undefined;
-    return (await collection.find({ userId }).sort({ isDefault: -1, createdAt: 1 }).toArray()) as BindingDoc[];
+    return callDbApiSoft<BindingDoc[]>('bindings', 'list', { userId });
 }
 
 /** 默认绑定(没有默认标记时取最近更新的一条); db_disabled 与"没有绑定"分开表达 */
 export async function getDefaultBinding(userId: string): Promise<BindingLookup> {
-    const collection = await bindingsCollection().catch(() => undefined);
-    if (!collection) return { status: 'db_disabled' };
-    const doc = await collection.findOne({ userId, isDefault: true })
-        ?? await collection.findOne({ userId }, { sort: { updatedAt: -1 } });
-    return { status: 'ok', doc: (doc as BindingDoc | null) ?? null };
+    const doc = await callDbApiSoft<BindingDoc | null>('bindings', 'getDefault', { userId });
+    return doc === undefined ? { status: 'db_disabled' } : { status: 'ok', doc };
 }
 
-/** 解绑指定账号; 若删掉的正是默认账号, 把最早的一条提升为默认 */
+/** 解绑指定账号; 若删掉的正是默认账号, 服务端会把最早的一条提升为默认 */
 export async function removeBinding(userId: string, accountId: number): Promise<'ok' | 'not_found' | 'db_disabled'> {
-    const collection = await bindingsCollection().catch(() => undefined);
-    if (!collection) return 'db_disabled';
-    const doc = await collection.findOneAndDelete({ userId, accountId });
-    if (!doc) return 'not_found';
-    if (doc.isDefault) {
-        const next = await collection.findOne({ userId }, { sort: { createdAt: 1 } });
-        if (next) await collection.updateOne({ _id: next._id }, { $set: { isDefault: true, updatedAt: new Date() } });
-    }
-    return 'ok';
+    const res = await callDbApiSoft<{ removed: boolean }>('bindings', 'remove', { userId, accountId });
+    if (res === undefined) return 'db_disabled';
+    return res.removed ? 'ok' : 'not_found';
 }
 
 /** 切换默认账号 */
 export async function setDefaultBinding(userId: string, accountId: number): Promise<'ok' | 'not_found' | 'db_disabled'> {
-    const collection = await bindingsCollection().catch(() => undefined);
-    if (!collection) return 'db_disabled';
-    const target = await collection.findOne({ userId, accountId });
-    if (!target) return 'not_found';
-    await collection.updateMany({ userId, isDefault: true }, { $set: { isDefault: false, updatedAt: new Date() } });
-    await collection.updateOne({ userId, accountId }, { $set: { isDefault: true, updatedAt: new Date() } });
-    return 'ok';
+    const res = await callDbApiSoft<{ updated: boolean }>('bindings', 'setDefault', { userId, accountId });
+    if (res === undefined) return 'db_disabled';
+    return res.updated ? 'ok' : 'not_found';
 }

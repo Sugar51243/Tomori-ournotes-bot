@@ -8,12 +8,12 @@
 | [doc/endpoint.md](doc/endpoint.md) | 全部端点、请求参数、响应约定 |
 | [doc/fuzzySearch.md](doc/fuzzySearch.md) | 模糊搜索机制（别名索引、搜索优先级、用户关键词） |
 | [doc/config.md](doc/config.md) | `.env` 配置项与代码常量（缓存 TTL） |
-| [doc/community.md](doc/community.md) | 社区功能（交友 / 车站 / 关键词）与 MongoDB 部署 |
+| [doc/community.md](doc/community.md) | 社区功能（交友 / 车站 / 关键词）与数据库 API 对接 |
 | [gateway/README.md](gateway/README.md) | 账号查询的数据源说明与 moenotes-api 自建网关教程 |
 
 > 框架图说明（[doc/framework.html](doc/framework.html)，浏览器打开，支持深浅色切换 / 缩放 / 章节视图）：
 > - **数据源回退**：主源 `DATA_SOURCE` → 备用源 `BACKUP_SOURCE` → `bdon.moe` 兜底（去重），任一源失败（含 404）即回退，全败报「上游崩溃」
-> - **两个数据库**：MongoDB 只存社区数据（交友/车站/关键词）；榜线历史存 MySQL（失败自动回退 SQLite 缓冲并回灌）
+> - **数据都经「数据库 API」**：社区数据（交友/车站/关键词/绑定）在 MongoDB、榜线历史在 MySQL，两者都由 `database/` 项目独占读写；本服务只发 HTTP 请求（榜线 API 不可用时自动回退 SQLite 缓冲并回灌）
 > - **后台任务**：榜线每小时采样写库；公告轮询经 SSE 推送给订阅方
 
 ---
@@ -55,10 +55,10 @@
 ### 依赖声明
 
 - **运行时**：Node.js **>= 20**（见 `package.json.engines`）
-- **npm 依赖**：`express` / `express-validator`（HTTP 与参数校验）、`axios`（上游请求）、`dotenv`（配置）、`@napi-rs/canvas`（**原生模块**，出图）、`mongodb`（仅社区功能）
+- **npm 依赖**：`express` / `express-validator`（HTTP 与参数校验）、`axios`（上游请求）、`dotenv`（配置）、`@napi-rs/canvas`（**原生模块**，出图）
 - **开发依赖**：`typescript` / `tsx` / `@types/node` / `@types/express`
 - **系统字体**（出图必需）：中文走 `Microsoft YaHei`，符号与 emoji 回退 `Segoe UI Symbol` / `Segoe UI Emoji`。**Linux 部署需自备中文字体**，否则出图中文异常
-- **MongoDB**：可选，仅交友/车站/关键词需要（见 [doc/community.md](doc/community.md)）
+- **数据库 API**：社区与榜线数据存储的服务（`database/` 项目，独占 MySQL/MongoDB 凭据）；本服务只依赖它的 HTTP 地址与令牌
 - **网络**：需能访问 `metadata.bdon.moe`、`assets.bdon.moe`、`api.bdon.moe`（公告/排行）、`storage.bdon.moe`（歌曲meta 的谱面效率数据）与 `bdon.moe`（账号查询与国旗图标）；选了 `haneoka.org` 作为数据源时还需能访问 `haneoka.org`
 
 ### 部署步骤
@@ -84,7 +84,7 @@ npm run build && npm start
 1. 启动服务：`npm start`（或 `start.bat` / 开发用 `dev.bat`）
 2. 默认监听 `http://127.0.0.1:3000`（`PORT`/`LOCATION` 可改；`LOCATION=0.0.0.0` 对外公开）；用 `GET /health` 检查，返回各区域 dataVersion 与运行时长
 3. 缓存目录默认 `./cache`（已 gitignore），可整目录删除后按需重建
-4. 可选：启用社区功能需装 MongoDB 并配置 `.env`，见 [doc/community.md](doc/community.md)
+4. 可选：启用社区功能需部署 `database/` 并配置 `.env`，见 [doc/community.md](doc/community.md)
 
 > **本服务没有任何访问鉴权**，不要直接暴露到公网；仅建议本机或内网自用。
 
@@ -94,7 +94,7 @@ npm run build && npm start
 现在的**数据源和数据库是单独拆出来的**，就像一个插件一样只弄一个对应的解释器就能直接用在后续功能，不用再改一堆东西了。<br>
 允许了**多源回退**机制，而且把数据库与数据源拆出来也能更好更方便的开发更多数据源切换。<br>
 另外东西也**分成了路由、上游、搜索、数据处理和渲染**，该改哪直接看哪就行。<br>
-数据库采用了双库，**车站和交友的社区功能采用MongoDB**，有TTL索引方便删除，用户数据存起来也更易懂。**榜线则改成了MySQL**，**失败回退SQLite**，允许本机，也允许未来改成分布式，甚至多端。<br>
+数据存储由独立的**数据库 API**（`database/` 项目）独占：**车站和交友的社区功能在MongoDB**，有TTL索引方便删除，用户数据存起来也更易懂；**榜线在MySQL**，**失败回退SQLite**，允许本机，也允许未来改成分布式，甚至多端。<br>
 模糊搜索加了一堆机制，自己看去吧。就差没有引入AI了。[doc/fuzzySearch.md](doc/fuzzySearch.md)<br>
 改动大概就这些了。
 

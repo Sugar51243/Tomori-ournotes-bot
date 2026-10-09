@@ -5,7 +5,7 @@ import {
     KeywordDoc, KeywordEntityType, KEYWORD_ENTITY_LABELS, KEYWORD_FUZZY_TYPES,
     MAX_KEYWORDS_PER_ENTITY, MAX_KEYWORD_LENGTH
 } from '../features/types/Keyword';
-import { keywordsCollection } from './mongo';
+import { callDbApiSoft, DbApiError } from './apiClient';
 import { normalizeSearchText, setKeywordOverlay, getBaseFuzzyConfig, FuzzySearchConfig } from '../search/fuzzySearch';
 import { bumpRenderEpoch } from '../renderEpoch';
 
@@ -89,13 +89,13 @@ export async function ensureKeywordsLoaded(force = false): Promise<void> {
     if (!force && snapshot && Date.now() - loadedAt < ttl.keywordCacheTtlS * 1000) return;
     if (!inflight) {
         inflight = (async () => {
-            const collection = await keywordsCollection().catch(() => undefined);
-            if (!collection) {
+            // 连接层失败折叠成 undefined(数据库 API 未配置/连不上) → 空快照, 不抛错
+            const docs = await callDbApiSoft<KeywordDoc[]>('keywords', 'listAll');
+            if (!docs) {
                 apply(EMPTY);
                 return;
             }
-            const docs = await collection.find({}).sort({ createdAt: 1 }).toArray();
-            const next = buildSnapshot(docs as KeywordDoc[]);
+            const next = buildSnapshot(docs);
             apply(next);
             logger('keywords', `loaded ${docs.length} keywords for ${next.byEntity.size} entities`);
         })().catch(e => {
@@ -206,9 +206,6 @@ export async function addKeyword(input: {
     const norm = normalizeSearchText(keyword);
     if (!norm) return { ok: false, reason: '关键词去掉标点后为空' };
 
-    const collection = await keywordsCollection().catch(() => undefined);
-    if (!collection) return { ok: false, reason: DB_DISABLED };
-
     const fuzzyType = KEYWORD_FUZZY_TYPES[entityType];
     const aliases = await entityNameAliasIndex();
     if (aliases) {
@@ -238,10 +235,13 @@ export async function addKeyword(input: {
     }
 
     try {
-        await collection.insertOne({ entityType, entityId, keyword, normKeyword: norm, userId, createdAt: new Date() });
+        const res = await callDbApiSoft<{ ok: true }>('keywords', 'add', {
+            entityType, entityId, keyword, normKeyword: norm, userId
+        });
+        if (res === undefined) return { ok: false, reason: DB_DISABLED };
     } catch (e) {
-        // 并发上传同一关键词时由唯一索引兜底
-        if ((e as { code?: number }).code === 11000) return { ok: false, reason: '该关键词已存在' };
+        // 并发上传同一关键词时由唯一索引兜底(服务端把 11000 映射成 CONFLICT)
+        if (e instanceof DbApiError && e.code === 'CONFLICT') return { ok: false, reason: '该关键词已存在' };
         throw e;
     }
 
@@ -261,19 +261,18 @@ export async function removeKeyword(input: {
     const norm = normalizeSearchText(input.keyword);
     if (!norm) return { ok: false, reason: '关键词去掉标点后为空' };
 
-    const collection = await keywordsCollection().catch(() => undefined);
-    if (!collection) return { ok: false, reason: DB_DISABLED };
-
-    const result = await collection.deleteOne({
+    const res = await callDbApiSoft<{ removed: number }>('keywords', 'remove', {
         entityType: input.entityType,
         entityId: input.entityId,
         normKeyword: norm,
         userId: input.userId
     });
-    if (result.deletedCount > 0) {
+    if (res === undefined) return { ok: false, reason: DB_DISABLED };
+
+    if (res.removed > 0) {
         await ensureKeywordsLoaded(true);
         bumpRenderEpoch();
         logger('keywords', `[${input.entityType} ${input.entityId}] -${input.keyword} by ${input.userId}`);
     }
-    return { ok: true, removed: result.deletedCount };
+    return { ok: true, removed: res.removed };
 }

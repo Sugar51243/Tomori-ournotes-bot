@@ -14,6 +14,9 @@ export function encodeDates(value: unknown): unknown {
     if (value instanceof Date) return { [DATE_TAG]: value.toISOString() };
     if (Array.isArray(value)) return value.map(encodeDates);
     if (value !== null && typeof value === 'object') {
+        // 自带 toJSON 的对象(ObjectId / Decimal 等)原样交给 JSON.stringify ——
+        // 深度拷贝会把它们的内部字段摊平(ObjectId 会变成 {i0,i1,...}), 破坏序列化
+        if (typeof (value as { toJSON?: unknown }).toJSON === 'function') return value;
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = encodeDates(v);
         return out;

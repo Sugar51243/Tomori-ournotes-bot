@@ -11,6 +11,10 @@ import { songCacheOps } from './songCacheRoutes';
 import { bindCodesOps } from './bindCodesRoutes';
 import { accountsOps } from './accountsRoutes';
 import { miscOps } from './miscRoutes';
+import { keywordsOps } from './keywordsRoutes';
+import { friendsOps } from './friendsRoutes';
+import { stationsOps } from './stationsRoutes';
+import { bindingsOps } from './bindingsRoutes';
 
 /**
  * /v1 下的全部模块。每个模块一张 op 表, 挂成 POST /v1/<module>/<op>。
@@ -29,3 +33,7 @@ v1Router.use('/songCache', opRouter(songCacheOps));
 v1Router.use('/bindCodes', opRouter(bindCodesOps));
 v1Router.use('/accounts', opRouter(accountsOps));
 v1Router.use('/misc', opRouter(miscOps));
+v1Router.use('/keywords', opRouter(keywordsOps));
+v1Router.use('/friends', opRouter(friendsOps));
+v1Router.use('/stations', opRouter(stationsOps));
+v1Router.use('/bindings', opRouter(bindingsOps));

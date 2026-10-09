@@ -64,8 +64,8 @@
 
 **隐私口径**：网页返回给 bot 的账号包数据一律遵循它自己的**公开开关**（卡片 / 道具 / 歌曲各自是否公开）——
 隐藏的类别对任何人都不下发，**绑定本人也一样**。绑定的作用只有两个：免输玩家 ID（默认账号）+
-用一次性绑定码证明账号归属（防冒绑）。绑定关系存在 bot 的 MongoDB（集合 `bindings`，一个 QQ 可绑多个账号，
-唯一键 `(userId, accountId)`），与社区功能同一个 `ENABLE_DB` 门槛。
+用一次性绑定码证明账号归属（防冒绑）。绑定关系存在 MongoDB 的 `bindings` 集合（一个 QQ 可绑多个账号，
+唯一键 `(userId, accountId)`），读写经「数据库 API」；与社区功能同一个 `ENABLE_DB` 门槛。
 
 ### 绑定流程
 
@@ -106,12 +106,10 @@
 | `CUTOFF_RECORD_INTERVAL_S` | int（秒） | `3600` | 活动榜线（各档分数）采样间隔（仅进行中的活动） |
 | `CUTOFF_BUCKET_S` | int（秒） | `3600` | 采样聚合桶大小，同一桶内采样互相覆盖 |
 | `CUTOFF_QUERY_RECORD_MIN_INTERVAL_S` | int（秒） | `300` | 用户查询触发采样的冷却；冷却内直接复用上次采样。`0` = 关闭冷却（每次查询都采） |
-| `MYSQL_HOST` | string | 空 | 榜线历史的 MySQL 主机；留空则不启用 MySQL，直接用 SQLite |
-| `MYSQL_PORT` | int | `3306` | MySQL 端口 |
-| `MYSQL_USER` | string | 空 | MySQL 用户 |
-| `MYSQL_PASSWORD` | string | 空 | MySQL 密码 |
-| `MYSQL_DATABASE` | string | `tomori` | MySQL 库名；库不存在时自动 `CREATE DATABASE IF NOT EXISTS`（**只建库，不建用户**），无权限则回退 SQLite |
-| `SQLITE_PATH` | string | `./data/tomori.sqlite` | SQLite 回退/缓冲文件；MySQL 不可用时榜线写入这里，恢复后自动回灌 |
+| `DB_API_BASE_URL` | string（URL） | 空 | 「数据库 API」地址（`database/` 项目）；留空 = 不启用远程存储，直接用 SQLite |
+| `DB_API_TOKEN` | string | 空 | 访问数据库 API 的令牌；与 `database/` 的 `.env` 里 `DB_API_TOKENS` 的 `bot=` 那段同值 |
+| `DB_API_TIMEOUT_MS` | int（毫秒） | `10000` | 单次数据库 API 请求超时；超时按不可用处理（降级 SQLite 缓冲） |
+| `SQLITE_PATH` | string | `./data/tomori.sqlite` | SQLite 回退/缓冲文件；数据库 API 不可用时榜线写入这里，恢复后自动回灌 |
 
 ## 渲染与分页
 
@@ -137,19 +135,24 @@
 
 ## 数据库与社区
 
-榜线历史**不再**存 MongoDB：优先 MySQL（见「榜线采样」节的 `MYSQL_*`），连接失败回退 SQLite，
-MySQL 恢复后自动把降级期数据回灌；首次启动会把 Mongo `cutoffs` 集合里的旧数据只读迁移过来，
-**Mongo 原数据保留不动**。下面的 MongoDB 配置仅服务于社区功能（交友/车站/关键词）。
+**全部 MySQL 与 MongoDB 读写都经「数据库 API」**（`database/` 项目，全系统唯一持有数据库凭据的
+进程）；本进程不再有连接串、SQL 或数据库驱动。所谓 `DB_API_*`（见「榜线采样」节）同时服务两件事：
+
+- **榜线历史**：优先经数据库 API 写入 MySQL；不可用时回退 SQLite 缓冲，恢复后自动回灌；
+  首次启动会把 Mongo `cutoffs` 集合里的旧数据只读迁移过来，**Mongo 原数据保留不动**。
+- **社区数据**（交友/车站/关键词/绑定）：经数据库 API 访问 MongoDB，索引由它统一创建。
+
+API 地址或令牌未配置、或者 API 连不上时：榜线走 SQLite 兜底，社区端点按「服务器未启用数据库」
+处理（与旧版直连失败时的行为一致）。
 
 | 变量名 | 数据种类 | 默认值 | 用途 |
 | --- | --- | --- | --- |
 | `ENABLE_DB` | bool | `false` | 社区功能总开关；关闭时交友/关键词/车站端点返回 404 占位 |
-| `MONGODB_URI` | string | 空 | 社区功能的 MongoDB 连接串（榜线迁移也会读取其中的 `cutoffs` 集合） |
-| `MONGODB_DB` | string | `tomori` | 数据库名 |
-| `DB_CONNECT_TIMEOUT_MS` | int（毫秒） | `3000` | 数据库连接超时 |
-| `STATION_TTL_S` | int（秒） | `150` | 车站房号有效期 |
 | `MAX_KEYWORD_LENGTH` | int | `32` | 单条用户关键词字数上限 |
 | `MAX_KEYWORDS_PER_ENTITY` | int | `20` | 单个实体的用户关键词条数上限 |
+
+> 车站房号有效期（原 `STATION_TTL_S`）与 MongoDB/MySQL 连接信息都已归 `database/` 项目配置，
+> 见 `database/README.md` 的「配置速查」。
 
 ## 抽卡模拟
 

@@ -6,7 +6,7 @@ import { CutoffRow } from './backend';
 import { CutoffRuntime } from './runtime';
 import { tryOpenRemoteBackend } from './remote';
 import { tryOpenSqliteBackend } from './sqlite';
-import { closeMongo, cutoffsForMigration } from '../mongo';
+import { callDbApi } from '../apiClient';
 
 /**
  * 榜线历史的存取。
@@ -19,6 +19,26 @@ import { closeMongo, cutoffsForMigration } from '../mongo';
 
 let runtime: CutoffRuntime | undefined;
 
+/** 旧榜线(Mongo 时代)集合的分页扫描大小(与旧驱动的 batchSize 一致) */
+const LEGACY_SCAN_BATCH = 1000;
+
+/**
+ * 旧 `cutoffs` 集合的只读迭代(经数据库 API 的 cutoff.legacyScan 分页)。
+ * 只读源, 不写; 连接/读取失败原样抛出, 由运行时按"暂不可用"退避重试。
+ */
+async function* legacyCutoffDocs(): AsyncGenerator<unknown> {
+    let afterId: string | undefined;
+    for (;;) {
+        const page = await callDbApi<{ docs: unknown[]; next: string | null }>('cutoff', 'legacyScan', {
+            ...(afterId ? { afterId } : {}),
+            limit: LEGACY_SCAN_BATCH
+        });
+        for (const doc of page.docs) yield doc;
+        if (!page.next) return;
+        afterId = page.next;
+    }
+}
+
 function getRuntime(): CutoffRuntime {
     runtime ??= new CutoffRuntime({
         log: m => logger('cutoff', m),
@@ -27,10 +47,12 @@ function getRuntime(): CutoffRuntime {
             ? tryOpenRemoteBackend()
             : Promise.resolve(undefined),
         openSqlite: () => tryOpenSqliteBackend(config.sqlitePath),
-        mongo: config.mongoUri ? {
-            iterate: () => cutoffsForMigration(),
-            // ENABLE_DB=false(社区功能关)时迁移完就断开; 开着则连接还给社区功能复用
-            close: config.enableDb ? async () => undefined : closeMongo
+        // 旧榜线的一次性迁移: 数据源走数据库 API 的只读扫描(与 ENABLE_DB 无关 ——
+        // 旧数据可能来自当时开过 ENABLE_DB 的部署, 口径与迁移前一致)。
+        mongo: config.dbApiBaseUrl ? {
+            iterate: async () => legacyCutoffDocs(),
+            // HTTP 无连接需要归还; 保留字段只为满足运行时接口
+            close: async () => undefined
         } : undefined
     });
     return runtime;

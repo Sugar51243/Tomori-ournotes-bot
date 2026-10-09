@@ -158,10 +158,6 @@ export const config = {
     httpTimeoutMs: envInt('HTTP_TIMEOUT_MS', 20000),
     logLevel: envStr('LOG_LEVEL', 'info'),
     enableDb: envBool('ENABLE_DB', false),
-    /** 社区功能(交友/车站)的 MongoDB; 未配置 URI 时这些接口按"服务器未启用数据库"处理 */
-    mongoUri: envStr('MONGODB_URI', ''),
-    mongoDb: envStr('MONGODB_DB', 'tomori'),
-    dbConnectTimeoutMs: envInt('DB_CONNECT_TIMEOUT_MS', 3000),
     /**
      * 数据库 API(榜线历史的优先存储; 与 ENABLE_DB 无关)。
      * 数据库凭据与全部 SQL 都在该服务里, 本进程只发语义化请求。
@@ -172,10 +168,8 @@ export const config = {
     dbApiToken: envStr('DB_API_TOKEN', ''),
     /** 单次请求超时(毫秒); 超时按不可用处理, 由上层降级 */
     dbApiTimeoutMs: envInt('DB_API_TIMEOUT_MS', 10000),
-    /** 榜线历史的 SQLite 回退/缓冲文件(MySQL 不可用时写入, 恢复后自动回灌); 解析方式同 cacheDir */
+    /** 榜线历史的 SQLite 回退/缓冲文件(数据库 API 不可用时写入, 恢复后自动回灌); 解析方式同 cacheDir */
     sqlitePath: path.resolve(envStr('SQLITE_PATH', './data/tomori.sqlite')),
-    /** 车站房间有效期(秒): 默认同 tsugu 的 150 秒 */
-    stationTtlS: envInt('STATION_TTL_S', 150),
     /** 单条用户关键词的长度上限(字) */
     maxKeywordLength: envInt('MAX_KEYWORD_LENGTH', 32),
     /** 单个实体可挂的用户关键词数量上限 */

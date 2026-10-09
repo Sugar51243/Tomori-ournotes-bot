@@ -48,3 +48,7 @@ export type PostSort = (typeof POST_SORTS)[number];
 /** 自制谱列表排序白名单 */
 export const CHART_SORTS = ['id', 'latest', 'notes'] as const;
 export type ChartSort = (typeof CHART_SORTS)[number];
+
+/** 用户关键词可挂的实体类型(与 bot 的 src/features/types/Keyword.ts 一致) */
+export const KEYWORD_ENTITY_TYPES = ['character', 'card', 'supportCard', 'song', 'band'] as const;
+export type KeywordEntityType = (typeof KEYWORD_ENTITY_TYPES)[number];

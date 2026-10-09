@@ -97,7 +97,7 @@ app.use('/deckBuilder', deckBuilderRouter);                         // 组卡工
 
 // 社区功能(交友/车站): 检查是否开启数据库功能, 未启用数据库时保持 404 占位
 if (config.enableDb) {
-    logger('app', `community features enabled (mongo: ${config.mongoUri || '未配置'})`);
+    logger('app', `community features enabled (database api: ${config.dbApiBaseUrl || '未配置'})`);
 } else {
     logger('app', 'ENABLE_DB=false, community features (friend/station) stay disabled');
 }

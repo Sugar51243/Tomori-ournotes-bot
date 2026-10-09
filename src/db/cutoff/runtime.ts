@@ -22,7 +22,7 @@ export interface RuntimeDeps {
     openPrimary: () => Promise<CutoffBackend | undefined>;
     /** 打开 SQLite 后端; 原生模块缺失/文件不可写返回 undefined */
     openSqlite: () => Promise<CutoffBackend | undefined>;
-    /** Mongo 迁移源; 未配置 MONGODB_URI 时整个字段缺省 */
+    /** 旧榜线(Mongo 时代)迁移源; 未配置数据库 API 时整个字段缺省 */
     mongo?: {
         iterate: () => Promise<AsyncIterable<unknown> | undefined>;
         close: () => Promise<void>;
