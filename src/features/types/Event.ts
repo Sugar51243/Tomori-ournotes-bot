@@ -1,4 +1,5 @@
 import { EventRow, EventEffectRow, EventPickupCardRow, ChallengeMusicRow } from './MasterData';
+import { EventPhase } from './EventPhase';
 import { regionFor } from '../../db/adapter';
 import { parseGameDate } from './Gacha';
 import { eventBackgroundUrl, eventLogoUrl } from '../../upstream/adapter';
@@ -105,6 +106,11 @@ export class Event {
     endAt?: Date;
     /** 展示用结束时间(结算展示, 通常晚于 endAt) */
     displayEndAt?: Date;
+    /**
+     * 上游 rankd 给的活动阶段(仅该活动正被上游追踪时有值, 由功能层在 init() 后赋值)。
+     * 上游阶段**优先于**时间推导 —— 它是唯一能区分「集计中/结果公布」的信息源。
+     */
+    upstreamPhase?: EventPhase;
     eventType = 0;
     logoAsset = '';
 
@@ -393,6 +399,20 @@ export class Event {
         if (now < this.startAt) return 'upcoming';
         if (now > this.endAt) return 'ended';
         return 'open';
+    }
+
+    /**
+     * 当前阶段(判断「有没有活动进行中」一律用它, 不要直接用 status())。
+     * 上游阶段优先(唯一能区分集计/结果); 没有时按 masterdata 时间粗判:
+     * 未开始 feature / 进行中 nowOn / 已结束 end —— **[endAt, displayEndAt] 的结算展示期归入已结束**,
+     * 不猜 aggregation 与 result(主数据没有聚合时长, 猜错比不猜更糟); 时间缺失时返回 undefined(未知)。
+     */
+    phase(now = new Date()): EventPhase | undefined {
+        if (this.upstreamPhase) return this.upstreamPhase;
+        if (!this.startAt || !this.endAt) return undefined;
+        if (now < this.startAt) return 'feature';
+        if (now <= this.endAt) return 'nowOn';
+        return 'end';
     }
 
     /** 总时长(毫秒) */

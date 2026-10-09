@@ -5,6 +5,8 @@ import { registerFonts } from './render/component/fonts';
 import { SERVER_LIST } from './features/types/Server';
 import { searchSongRouter } from './routers/song/searchSong';
 import { songMetaRouter } from './routers/song/songMeta';
+import { chartEfficiencyRouter } from './routers/song/chartEfficiency';
+import { eventDeckContextRouter } from './routers/event/eventDeckContext';
 import { songChartRouter } from './routers/song/songChart';
 import { songChartDataRouter } from './routers/song/songChartData';
 import { songRankingRouter } from './routers/song/songRanking';
@@ -26,6 +28,10 @@ import { fuzzySearchRouter } from './routers/fuzzySearch';
 import { announcementRouter } from './routers/announcement/announcementRoute';
 import { createAnnouncementStreamRouter } from './routers/announcement/announcementStream';
 import { playerRouter } from './routers/player/playerRoute';
+import { playerCardRouter } from './routers/player/playerCard';
+import { b25Router } from './routers/player/b25';
+import { deckBuilderRouter } from './routers/player/deckBuilder';
+import { playerBindRouter } from './routers/player/playerBind';
 import { eventRankingRouter } from './routers/event/eventRanking';
 import { eventRecommendRouter } from './routers/event/eventRecommend';
 import { cutoffRouter } from './routers/event/cutoffRoute';
@@ -61,6 +67,9 @@ app.use('/getCardIllustration', getCardIllustrationRouter);         // 卡片原
 // 榜单相关
 app.use('/songMeta', songMetaRouter);                               // 歌曲元信息(多服一图, 静态数据)
 app.use('/eventRecommend', eventRecommendRouter);                   // 活动推荐曲(单服, 静态数据+活动报酬)
+// 网页端组卡器用的两个数据端点(不是聊天功能, 返回 JSON)
+app.use('/chartEfficiency', chartEfficiencyRouter);                 // 谱面效率表(多服一图, 静态数据)
+app.use('/eventDeckContext', eventDeckContextRouter);               // 当前活动 + 演出报酬(单服)
 app.use('/songRanking', songRankingRouter);                         // 歌曲排行前十(单服, 用户动态数据)
 app.use('/eventSongRanking', eventRankingRouter);                   // 活动歌榜(单服, 用户动态数据; 带榜线 rank 参数)
 app.use('/eventRanking', eventRankingRouter);                       // 活动歌榜旧路径, 保留兼容
@@ -81,7 +90,10 @@ app.use('/announcementStream', createAnnouncementStreamRouter());   // 公告推
 app.use('/searchCharacter', searchCharacterRouter);                 // 查角色(多服一图, 静态数据)
 app.use('/searchBand', searchBandRouter);                           // 查乐团(多服一图, 静态数据)
 app.use('/getStampImage', getStampImageRouter);                     // 贴纸原图(按数字 ID)
-app.use('/searchPlayer', playerRouter);                             // 账号查询(单服, 用户动态数据)
+app.use('/searchPlayer', playerRouter);                             // 账号查询(单服, 用户动态数据; 附带网页账号包数据)
+app.use('/playerCard', playerCardRouter);                           // 查名片(单服, 用户动态数据; 原图直出)
+app.use('/b25', b25Router);                                         // B25 计分榜(单服; 需要网页账号包)
+app.use('/deckBuilder', deckBuilderRouter);                         // 组卡工具(单服; 与网页组卡器同逻辑)
 
 // 社区功能(交友/车站): 检查是否开启数据库功能, 未启用数据库时保持 404 占位
 if (config.enableDb) {
@@ -98,6 +110,7 @@ app.use('/keyword/upload', config.enableDb ? keywordUploadRouter : disabledRoute
 app.use('/keyword/delete', config.enableDb ? keywordDeleteRouter : disabledRouter());   // 删除关键字(单服, 用户动态数据)
 app.use('/station', config.enableDb ? stationRouter : disabledRouter());                // 车站(单服, 用户动态数据)
 app.use('/roomList', config.enableDb ? roomListRouter : disabledRouter());              // 房间列表(单服, 用户动态数据)
+app.use('/playerBind', config.enableDb ? playerBindRouter : disabledRouter());          // 玩家绑定管理(QQ ↔ 游戏账号, 可绑多个)
 
 // 占位 / 404
 app.use('/user', disabledRouter());                                 // tsugu 的 /user 是账号绑定 API, 本服务不实现

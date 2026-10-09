@@ -19,7 +19,9 @@ router.post(
     [
         body('displayedServerList').optional().custom(isServerInput),
         // number 与纯数字字符串都接受(tsugu 传 number, 本项目交友接口传字符串)
-        body('playerId').custom(v => typeof v === 'number' || (typeof v === 'string' && /^\d{1,19}$/.test(v))),
+        // playerId 可省略 = 用默认绑定(userId 指定); 两者至少要有一个, 由 feature 层给文案
+        body('playerId').optional().custom(v => v === undefined || typeof v === 'number' || (typeof v === 'string' && /^\d{1,19}$/.test(v))),
+        body('userId').optional().isString().isLength({ min: 1, max: 32 }),
         body('useEasyBG').optional().isBoolean(),   // tsugu 兼容, 忽略
         body('compress').optional().isBoolean(),
     ],

@@ -5,6 +5,7 @@ import type { FriendDoc } from '../features/types/Friend';
 import type { StationDoc } from '../features/types/Station';
 import type { KeywordDoc } from '../features/types/Keyword';
 import type { CutoffDoc } from '../features/types/Cutoff';
+import type { BindingDoc } from '../features/types/Binding';
 
 /**
  * 社区功能(交友/车站)的 MongoDB 接入: 惰性单例 + 首次取集合时自建索引。
@@ -89,6 +90,20 @@ export async function stationsCollection(): Promise<Collection<StationDoc> | und
         { key: { number: 1 }, name: 'number_unique', unique: true }
     ]);
     return db.collection<StationDoc>('stations');
+}
+
+/**
+ * 玩家绑定集合: 一个 QQ 可绑多个游戏账号, 所以唯一键是 (userId, accountId)。
+ * userId 单列索引给"列出某人的全部绑定"用。
+ */
+export async function bindingsCollection(): Promise<Collection<BindingDoc> | undefined> {
+    const db = await getDb();
+    if (!db) return undefined;
+    await ensureIndexes('bindings', [
+        { key: { userId: 1, accountId: 1 }, name: 'user_account_unique', unique: true },
+        { key: { userId: 1 }, name: 'user_idx' }
+    ]);
+    return db.collection<BindingDoc>('bindings');
 }
 
 /**

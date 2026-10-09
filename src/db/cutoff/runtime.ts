@@ -3,23 +3,23 @@ import {
     CutoffBackend, CutoffRow, MONGO_MIGRATION_KEY, SQLITE_PENDING_KEY,
     UpsertMode, createMemoryBackend, sampleToRow, sanitizeRow
 } from './backend';
-import { migrateMongoToBackend, syncToMysql } from './migrate';
+import { migrateMongoToBackend, syncToPrimary } from './migrate';
 
 /**
  * 榜线存储的运行时状态机:
- * - 启动选择后端: MySQL(配了 MYSQL_HOST) → SQLite 文件 → 进程内存
- * - SQLite 始终作为"降级缓冲"打开: MySQL 挂了写它(同一事务里置脏标记),
- *   MySQL 恢复后自动回灌并切回去; 数据不会因一次连接失败而落到内存
+ * - 启动选择后端: 数据库 API(配了 DB_API_BASE_URL) → SQLite 文件 → 进程内存
+ * - SQLite 始终作为"降级缓冲"打开: 远程端挂了写它(同一事务里置脏标记),
+ *   远程端恢复后自动回灌并切回去; 数据不会因一次请求失败而落到内存
  * - MongoDB 旧数据只读迁移一次(marker 记在当前后端里, 失败退避重试)
  * - 巡检 15s 一拍, 后台进行, 不阻塞启动与请求
  */
 
 export interface RuntimeDeps {
     log: (msg: string) => void;
-    /** 是否配置了 MySQL(决定要不要持续探测恢复) */
-    mysqlConfigured: () => boolean;
-    /** 打开 MySQL 后端; 未配置/失败返回 undefined */
-    openMysql: () => Promise<CutoffBackend | undefined>;
+    /** 是否配置了远程主后端(数据库 API; 决定要不要持续探测恢复) */
+    primaryConfigured: () => boolean;
+    /** 打开远程主后端; 未配置/失败返回 undefined */
+    openPrimary: () => Promise<CutoffBackend | undefined>;
     /** 打开 SQLite 后端; 原生模块缺失/文件不可写返回 undefined */
     openSqlite: () => Promise<CutoffBackend | undefined>;
     /** Mongo 迁移源; 未配置 MONGODB_URI 时整个字段缺省 */
@@ -38,21 +38,21 @@ const RETRY_MAX_MS = 300_000;
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /**
- * 榜线存储的运行时状态机: 后端选择(MySQL → SQLite 缓冲 → 内存)、故障降级、
+ * 榜线存储的运行时状态机: 后端选择(数据库 API → SQLite 缓冲 → 内存)、故障降级、
  * 恢复回灌、Mongo 旧数据迁移, 以及后台巡检(15s 一拍, 失败指数退避)。
  * @param deps 依赖注入点(存储/日志/重试间隔), 测试可换假实现
  */
 export class CutoffRuntime {
     private active: CutoffBackend = createMemoryBackend();
     private sqlite: CutoffBackend | undefined;
-    private mysql: CutoffBackend | undefined;
+    private primary: CutoffBackend | undefined;
     private initPromise: Promise<void> | undefined;
     /** 写互斥: 实时写入 / 回灌 / 切换后端都串行, 降级期数据不会被同步流漏掉 */
     private writeChain: Promise<unknown> = Promise.resolve();
     private housekeeping = false;
     private timer: NodeJS.Timeout | undefined;
-    private nextMysqlAttemptAt = 0;
-    private mysqlRetryMs: number;
+    private nextPrimaryAttemptAt = 0;
+    private primaryRetryMs: number;
     private nextSyncAt = 0;
     private nextMongoAttemptAt = 0;
     private mongoRetryMs: number;
@@ -61,7 +61,7 @@ export class CutoffRuntime {
 
     constructor(private readonly deps: RuntimeDeps) {
         this.retryMin = deps.retryMinMs ?? RETRY_MIN_MS;
-        this.mysqlRetryMs = this.retryMin;
+        this.primaryRetryMs = this.retryMin;
         this.mongoRetryMs = this.retryMin;
     }
 
@@ -77,9 +77,9 @@ export class CutoffRuntime {
 
     private async doInit(): Promise<void> {
         this.sqlite = await this.openSafely('sqlite', () => this.deps.openSqlite());
-        this.mysql = await this.openSafely('mysql', () => this.deps.openMysql());
-        this.active = this.mysql ?? this.sqlite ?? createMemoryBackend();
-        this.deps.log(`cutoff store: ${this.active.kind}${!this.mysql && this.deps.mysqlConfigured() ? ' (mysql unavailable, using sqlite buffer)' : ''}`);
+        this.primary = await this.openSafely('database api', () => this.deps.openPrimary());
+        this.active = this.primary ?? this.sqlite ?? createMemoryBackend();
+        this.deps.log(`cutoff store: ${this.active.kind}${!this.primary && this.deps.primaryConfigured() ? ' (database api unavailable, using sqlite buffer)' : ''}`);
         this.timer = setInterval(() => void this.housekeep(), HOUSEKEEP_MS);
         this.timer.unref?.();
         void this.housekeep();
@@ -141,15 +141,15 @@ export class CutoffRuntime {
         return run;
     }
 
-    /** 只降不升; 升回 MySQL 由恢复探测完成(会把降级期数据一并回灌) */
+    /** 只降不升; 升回远程端由恢复探测完成(会把降级期数据一并回灌) */
     private degrade(reason: string): void {
-        if (this.active.kind === 'mysql') {
-            void this.mysql?.close?.().catch(() => undefined);
-            this.mysql = undefined;
+        if (this.active.kind === 'remote') {
+            void this.primary?.close?.().catch(() => undefined);
+            this.primary = undefined;
             if (this.sqlite) {
                 this.active = this.sqlite;
                 this.deps.log(`degraded to sqlite buffer (${reason})`);
-                this.nextMysqlAttemptAt = Date.now() + this.mysqlRetryMs;
+                this.nextPrimaryAttemptAt = Date.now() + this.primaryRetryMs;
                 return;
             }
         }
@@ -166,10 +166,10 @@ export class CutoffRuntime {
         try {
             await this.initPromise;
             const now = Date.now();
-            if (this.active.kind !== 'mysql' && this.deps.mysqlConfigured() && now >= this.nextMysqlAttemptAt) {
-                await this.tryRecoverMysql();
+            if (this.active.kind !== 'remote' && this.deps.primaryConfigured() && now >= this.nextPrimaryAttemptAt) {
+                await this.tryRecoverPrimary();
             }
-            if (this.active.kind === 'mysql' && this.sqlite && now >= this.nextSyncAt) {
+            if (this.active.kind === 'remote' && this.sqlite && now >= this.nextSyncAt) {
                 await this.trySyncBuffer();
             }
             if (this.deps.mongo && !this.mongoFinished && this.active.kind !== 'memory' && now >= this.nextMongoAttemptAt) {
@@ -182,11 +182,11 @@ export class CutoffRuntime {
         }
     }
 
-    /** SQLite 缓冲 → MySQL(脏标记置位时), 幂等 */
+    /** SQLite 缓冲 → 远程端(脏标记置位时), 幂等 */
     private async trySyncBuffer(): Promise<void> {
         const sqlite = this.sqlite;
-        const mysql = this.mysql;
-        if (!sqlite || !mysql) return;
+        const primary = this.primary;
+        if (!sqlite || !primary) return;
         try {
             const pending = await sqlite.getMeta(SQLITE_PENDING_KEY).catch(() => undefined);
             if (pending !== '1') return;
@@ -194,44 +194,44 @@ export class CutoffRuntime {
                 // 锁内复查: 可能已被上一轮清掉
                 const still = await sqlite.getMeta(SQLITE_PENDING_KEY).catch(() => undefined);
                 if (still !== '1') return;
-                const n = await syncToMysql(sqlite, mysql);
+                const n = await syncToPrimary(sqlite, primary);
                 await sqlite.setMeta(SQLITE_PENDING_KEY, '0');
-                this.deps.log(`backfilled ${n} row(s) from sqlite to mysql`);
+                this.deps.log(`backfilled ${n} row(s) from sqlite to database api`);
             });
             this.nextSyncAt = 0;
         } catch (e) {
             this.nextSyncAt = Date.now() + this.retryMin;
-            this.deps.log(`sqlite→mysql backfill failed, will retry: ${msg(e)}`);
+            this.deps.log(`sqlite→database api backfill failed, will retry: ${msg(e)}`);
         }
     }
 
-    /** MySQL 恢复探测: 回灌缓冲 + 在同一把写锁里切回 MySQL */
-    private async tryRecoverMysql(): Promise<void> {
-        let mysql: CutoffBackend | undefined;
+    /** 远程端恢复探测: 回灌缓冲 + 在同一把写锁里切回远程端 */
+    private async tryRecoverPrimary(): Promise<void> {
+        let primary: CutoffBackend | undefined;
         try {
-            mysql = await this.deps.openMysql();
-            if (!mysql) throw new Error('mysql still unavailable');
-            const recovered = mysql;
+            primary = await this.deps.openPrimary();
+            if (!primary) throw new Error('database api still unavailable');
+            const recovered = primary;
             await this.runExclusive(async () => {
                 if (this.sqlite) {
                     const pending = await this.sqlite.getMeta(SQLITE_PENDING_KEY).catch(() => undefined);
                     if (pending === '1') {
-                        const n = await syncToMysql(this.sqlite, recovered);
+                        const n = await syncToPrimary(this.sqlite, recovered);
                         await this.sqlite.setMeta(SQLITE_PENDING_KEY, '0');
-                        this.deps.log(`backfilled ${n} row(s) from sqlite to mysql`);
+                        this.deps.log(`backfilled ${n} row(s) from sqlite to database api`);
                     }
                 }
-                this.mysql = recovered;
+                this.primary = recovered;
                 this.active = recovered;
             });
-            this.mysqlRetryMs = this.retryMin;
-            this.nextMysqlAttemptAt = 0;
-            this.deps.log('mysql recovered, cutoff writes go to mysql');
+            this.primaryRetryMs = this.retryMin;
+            this.nextPrimaryAttemptAt = 0;
+            this.deps.log('database api recovered, cutoff writes go to the remote store');
         } catch (e) {
-            await mysql?.close?.().catch(() => undefined);
-            this.mysqlRetryMs = Math.min(RETRY_MAX_MS, this.mysqlRetryMs * 2);
-            this.nextMysqlAttemptAt = Date.now() + this.mysqlRetryMs;
-            this.deps.log(`mysql recovery attempt failed (retry in ${Math.round(this.mysqlRetryMs / 1000)}s): ${msg(e)}`);
+            await primary?.close?.().catch(() => undefined);
+            this.primaryRetryMs = Math.min(RETRY_MAX_MS, this.primaryRetryMs * 2);
+            this.nextPrimaryAttemptAt = Date.now() + this.primaryRetryMs;
+            this.deps.log(`database api recovery attempt failed (retry in ${Math.round(this.primaryRetryMs / 1000)}s): ${msg(e)}`);
         }
     }
 
@@ -253,7 +253,7 @@ export class CutoffRuntime {
             const n = await migrateMongoToBackend(this.active, docs);
             await this.active.setMeta(MONGO_MIGRATION_KEY, '1');
             if (this.active.kind === 'sqlite') {
-                // 当前活跃后端是缓冲: 标记待回灌, MySQL 恢复时一并带走
+                // 当前活跃后端是缓冲: 标记待回灌, 远程端恢复时一并带走
                 await this.active.setMeta(SQLITE_PENDING_KEY, '1');
             }
             this.mongoFinished = true;

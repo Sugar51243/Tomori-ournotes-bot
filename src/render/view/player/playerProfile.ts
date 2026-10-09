@@ -7,7 +7,7 @@ import { drawTitle, drawMetaBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H }
 import { drawServerIcon } from '../../component/serverIcon';
 import { wrapTextLines } from '../../component/draw';
 import { FONT_STACK, cjkFontFamily } from '../../component/fonts';
-import { fillTextCentered } from '../../component/draw';
+import { fillTextCentered, formatDateTime } from '../../component/draw';
 
 /**
  * 玩家档案图(**单服一图**)。
@@ -15,6 +15,7 @@ import { fillTextCentered } from '../../component/draw';
  * 视觉主体用「最爱成员卡」的卡面大图 —— 该字段四个服都有, 且取自**本项目自己的素材源**,
  * 不依赖玩家自己上传的 profile card(港澳台服常为空)。
  * profile card 缩略图来自游戏 CDN, 需过外链白名单, 有就附在下方。
+ * 页脚标注实际供数的数据源(回退链可能换源)与取数时间。
  */
 
 const WIDTH = 720;
@@ -22,6 +23,7 @@ const WIDTH = 720;
 const HEADER_H = TITLE_BAND_H + META_BAND_H;
 const ART_H = 320;
 const MARGIN = 16;
+const FOOTER_H = 20;
 
 /** 卡面大图铺满顶部并压暗, 保证文字可读 */
 async function drawArt(ctx: SKRSContext2D, server: Server, cardId: number | undefined, height: number): Promise<void> {
@@ -64,10 +66,18 @@ function drawStat(ctx: SKRSContext2D, x: number, y: number, label: string, value
 
 export async function drawPlayerProfile(server: Server, profile: PlayerProfile, compress: boolean): Promise<Array<Buffer | string>> {
     const p = serverProfile(server);
-    // profile card 缩略图(比例 1224:688), 只保留通过白名单的
-    const cardUrls = profile.profileCardUrls.filter(isAllowedExternalImage).slice(0, 3);
-    const cardH = cardUrls.length ? Math.round((WIDTH - MARGIN * 2) / (1224 / 688)) + 12 : 0;
-    const HEIGHT = HEADER_H + ART_H + cardH + MARGIN;
+    // profile card 缩略图(比例 1224:688), 只保留通过白名单的; **先取图再定高** ——
+    // 取不到的卡不占位, 高度按实际能画的卡数算(既不会把后面的卡裁到画布外, 也不会留空档)。
+    // 只画**当前使用的那一张**(其余页用 /playerCard 查) —— 查玩家图保持整洁。
+    const cardUrls = profile.profileCardUrls.filter(isAllowedExternalImage).slice(0, 1);
+    const cardBuffers: Buffer[] = [];
+    for (const [i, url] of cardUrls.entries()) {
+        const buf = await imageBuffer(url, `images/playercard/${server}/${profile.profileId}_${i}.img`).catch(() => undefined);
+        if (buf) cardBuffers.push(buf);
+    }
+    const cardH = cardBuffers.length ? Math.round((WIDTH - MARGIN * 2) / (1224 / 688)) + 12 : 0;
+    const cardsH = cardH * cardBuffers.length;
+    const HEIGHT = HEADER_H + ART_H + cardsH + FOOTER_H + MARGIN;
 
     const canvas = createCanvas(WIDTH, HEIGHT);
     const ctx = canvas.getContext('2d');
@@ -107,18 +117,26 @@ export async function drawPlayerProfile(server: Server, profile: PlayerProfile, 
     drawStat(ctx, statX[1], statY, '应援数', profile.totalFavorite !== undefined ? String(profile.totalFavorite) : '-');
     drawStat(ctx, statX[2], statY, '经验', profile.rankExp ?? '-');
 
-    // 玩家自制 profile card
-    if (cardUrls.length) {
+    // 玩家自制 profile card(图已在定高前取好)
+    if (cardBuffers.length) {
         let cy = HEADER_H + ART_H + 8;
-        for (const url of cardUrls) {
-            const buf = await imageBuffer(url, `images/playercard/${server}/${profile.profileId}_${cy}.img`).catch(() => undefined);
-            if (!buf) continue;
+        for (const buf of cardBuffers) {
             try {
                 ctx.drawImage(await loadImage(buf), MARGIN, cy, WIDTH - MARGIN * 2, cardH - 12);
-                cy += cardH;
-            } catch { /* 跳过 */ }
+            } catch { /* 解不开就跳过, 但照常占位(高度已定) */ }
+            cy += cardH;
         }
     }
+
+    // 页脚: 数据来源(实际供数的上游; 自建网关路径固定标「自建网关」)与取数时间
+    const footerY = HEADER_H + ART_H + cardsH + FOOTER_H / 2;
+    ctx.font = cjkFontFamily(12);
+    ctx.fillStyle = '#8a93a0';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const originText = profile.origin ?? '未知来源';
+    const fetchedText = profile.fetchedAt ? ` · 取数于 ${formatDateTime(new Date(profile.fetchedAt))}` : '';
+    ctx.fillText(`数据来源：${originText}${fetchedText}`, MARGIN, footerY, WIDTH - MARGIN * 2);
 
     return [await outputFinalBuffer(canvas, compress)];
 }

@@ -20,6 +20,8 @@ export interface MusicRanking {
     entries: RankingEntry[];
     /** 上游返回的更新时间(X-Fetched-At, 毫秒) */
     fetchedAt?: number;
+    /** 实际供数的数据源档案名(如 'bdon.moe' / 'haneoka.org'); 出图标注「数据来源」用 */
+    origin?: string;
 }
 
 /** 分数千分位(如 9,543,025) */

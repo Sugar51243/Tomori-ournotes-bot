@@ -1,10 +1,12 @@
 import { isInteger } from '../../search/fuzzySearch';
 import { SERVER_LIST, Server, withServer } from '../types/Server';
 import { Event } from '../types/Event';
+import { EventPhase } from '../types/EventPhase';
 import { Song } from '../types/Song';
 import { storeFor } from '../../db/adapter';
-import { getEventTracking, resolveDefaultEventId } from '../../upstream/adapter';
+import { getEventTracking, resolveCurrentEvent } from '../../upstream/adapter';
 import { searchEvents, textToFuzzyResult } from '../../search/search';
+import { noCurrentEventText } from './currentEvent';
 import { drawEventList } from '../../render/view/event/eventList';
 import { getMusicData, recommendCharts, RECOMMEND_DIFFICULTIES, OVERHEAD_MS } from '../../upstream/adapter';
 import { MusicDataScoreRank, RecommendRow } from '../types/MusicData';
@@ -15,7 +17,8 @@ import { drawEventRecommend, RecommendSection } from '../../render/view/event/ev
  *
  * 每个目标评级(SS/S/A/B)一段, 段内是**所需综合力最低**的前 5 张谱面(四难度混排)。
  * 图内的 pt/小时、道具/小时由本活动的报酬表估算(演出报酬 + 挑战演出报酬两张都列)。
- * 活动 id 不传时取当前开放的活动; 服务器沿回退链依次查询, 取第一个有该活动的服。
+ * 活动 id 不传时取当前**进行中**的活动(上游在活动结束后仍挂着旧活动, 见 upstream/events/client.ts);
+ * 服务器沿回退链依次查询, 取第一个有该活动的服。显式带 id 时不受阶段限制(推荐曲是静态数据)。
  */
 
 /** 每个目标评级各取前 N 张 */
@@ -27,7 +30,8 @@ const CHALLENGE_TARGET: MusicDataScoreRank['rank'] = 'SS';
 /** 难度下标 -> 名称(Song.difficulty 的顺序) */
 const DIFFICULTIES = ['easy', 'normal', 'hard', 'expert'] as const;
 /** 评级字母 -> 游戏表里的 liveScoreRank 数字(D/C/B/A/S/SS = 2..7) */
-const RANK_NUMBERS: Record<MusicDataScoreRank['rank'], number> = { D: 2, C: 3, B: 4, A: 5, S: 6, SS: 7 };
+/** 评级字母 → 上游的 liveScoreRank 数值（谱面效率端点也用它，所以是导出的） */
+export const RANK_NUMBERS: Record<MusicDataScoreRank['rank'], number> = { D: 2, C: 3, B: 4, A: 5, S: 6, SS: 7 };
 
 export interface EventRecommendQuery {
     id?: unknown;
@@ -44,7 +48,9 @@ export async function commandEventRecommend(servers: Server[], query: EventRecom
     // ---- 活动解析: id 传文本时在各服索引上依次解析(命中多个出活动列表图), 否则按 id; 不传取当前活动 ----
     const rawId = query.eventId ?? query.id;
     const textMode = rawId !== undefined && !isInteger(String(rawId));
-    // 沿回退链取第一个有该活动(未指定 id 时为当前活动)的服
+    /** 链上第一个「上游还挂着、但已不在进行中」的活动(没有进行中活动时用于出错文案) */
+    let finished: { server: Server; eventId: number; phase: EventPhase } | undefined;
+    // 沿回退链取第一个有该活动(未指定 id 时为当前**进行中**的活动)的服
     for (const server of servers) {
         let wanted: number | undefined;
         if (textMode) {
@@ -54,8 +60,12 @@ export async function commandEventRecommend(servers: Server[], query: EventRecom
             if (hits.length === 0) continue;
             if (hits.length > 1) return drawEventList(server, hits, compress);
             wanted = hits[0].eventId;
+        } else if (rawId === undefined) {
+            const current = await resolveCurrentEvent(server);
+            if (!finished && current.finished) finished = { server, ...current.finished };
+            wanted = current.eventId;
         } else {
-            wanted = rawId === undefined ? await resolveDefaultEventId(server) : parseInt(String(rawId), 10);
+            wanted = parseInt(String(rawId), 10);
         }
         if (wanted === undefined || !Number.isFinite(wanted)) continue;
         const event = withServer(new Event(wanted), server);
@@ -64,13 +74,19 @@ export async function commandEventRecommend(servers: Server[], query: EventRecom
         return renderRecommend(server, event, wanted, compress);
     }
     if (textMode) return ['没有搜索到符合条件的活动'];
-    return [rawId === undefined ? '错误: 该服务器当前没有开放的活动' : '错误: 该活动不存在'];
+    if (rawId === undefined) {
+        const server = finished?.server ?? servers[0];
+        return [noCurrentEventText(server, finished && { eventId: finished.eventId, phase: finished.phase }, '推荐曲')];
+    }
+    return ['错误: 该活动不存在'];
 }
 
 /** 在指定服上渲染该活动的推荐曲 */
 async function renderRecommend(server: Server, event: Event, eventId: number, compress: boolean): Promise<Array<Buffer | string>> {
     const data = await getMusicData();
     if (!data) return ['错误: 谱面效率数据暂不可用, 请稍后再试'];
+    // 降级数据(备用源「乐曲分析」模型)没有技能权重与评级门槛, 推荐算法无从计算 —— 不做降级展示
+    if (data.degraded) return ['错误: 谱面效率数据暂不可用（当前回退到备用源的降级数据，缺少技能权重与评级门槛），请稍后再试'];
 
     // 一击奏一自由: 全曲池(活动挑战曲本来就在池子里, 不额外排除), 每个评级各取前 TOP_N
     const sections: RecommendSection[] = [];

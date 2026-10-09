@@ -29,6 +29,11 @@ export interface EventRankingTrack {
     songs: EventRankingSong[];
     /** true = 来自上游追踪(带更新时间); false = 由 masterdata 兜底 */
     tracked: boolean;
+    /**
+     * 上游给的活动阶段(已按上游自带的 endAt 纠偏, 见 types/EventPhase.ts);
+     * 上游缺字段时为 undefined —— 调用方按「未知」保守处理, 不要当成已结束。
+     */
+    phase?: import('./EventPhase').EventPhase;
 }
 
 /** 单个挑战曲的榜(上游错误时带 kind, 供出图说明原因) */
@@ -36,6 +41,8 @@ export interface ChallengeRanking {
     entries: import('./Ranking').RankingEntry[];
     /** 上游错误种类: not_found / challenge_not_started / challenge_ranking_disabled / challenge_not_collected / pending / upstream ... */
     errorKind?: string;
-    /** 该榜数据的上游更新时间(ms epoch, 解自响应的 ETag; 解不出时为 undefined) */
+    /** 该榜数据的上游更新时间(ms epoch, 数据源钩子或 ETag 解出; 解不出时为 undefined) */
     fetchedAt?: number;
+    /** 实际供数的数据源档案名(如 'bdon.moe' / 'haneoka.org'); 出图标注「数据来源」用 */
+    origin?: string;
 }

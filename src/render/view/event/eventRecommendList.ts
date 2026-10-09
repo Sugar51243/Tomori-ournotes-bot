@@ -211,7 +211,7 @@ export async function drawEventRecommend(
 ): Promise<Array<Buffer | string>> {
     const height = HEADER_H + MARGIN
         + sections.reduce((sum, s) => sum + sectionHeight(s.rows.length), 0)
-        + FOOTER_H + MARGIN + notes.length * 16;
+        + FOOTER_H * 2 + MARGIN + notes.length * 16;   // 页脚两行: 算法说明 + 数据来源
     const canvas = createCanvas(WIDTH, height);
     const ctx = canvas.getContext('2d');
 
@@ -249,6 +249,11 @@ export async function drawEventRecommend(
     ctx.textBaseline = 'middle';
     ctx.fillText(
         `所需综合力 = 该评级门槛 ÷ 分/综合力；pt/时、道具/时 = 本场景报酬 × 局/小时(局/小时 = 3600s ÷ (BGM 时长 + ${OVERHEAD_MS / 1000}s))；击奏/自由只算演出报酬, 挑战live 只算挑战演出报酬`,
+        MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
+    y += FOOTER_H;
+    // 推荐曲只在完整 music-data(种子模型)可用时才会出图, 所以来源固定标注为 music-data 主源
+    ctx.fillText(
+        `数据来源：bdon.moe（music-data.json）+ 活动榜单（上游回退链）`,
         MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
     y += FOOTER_H;
     for (const note of notes) {

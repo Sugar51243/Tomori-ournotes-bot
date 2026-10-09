@@ -4,6 +4,7 @@ import { SERVER_LIST, Server } from '../../features/types/Server';
 import { CUTOFF_TIERS, CutoffSample, CutoffTier } from '../../features/types/Cutoff';
 import { RankingEntry } from '../../features/types/Ranking';
 import { EventRankingSong } from '../../features/types/EventRanking';
+import { mayBeRunning } from '../../features/types/EventPhase';
 import { currentEventTracking } from '../../upstream/adapter';
 import { getChallengeRanking } from '../../upstream/adapter';
 import { hourBucket, recordCutoffs } from '../../db/adapter';
@@ -17,6 +18,9 @@ import { hourBucket, recordCutoffs } from '../../db/adapter';
  *
  * 档位适配: 榜里第 N 条就是第 N 名, 所以只有「≤ 实际榜单长度」的档位才算数
  * (上游固定前 100 → 1000/5000/10000 自动不适配)。
+ *
+ * 只采**进行中**的活动(见 types/EventPhase.ts): 上游在活动结束后仍把旧活动挂在
+ * /events/current 上, 不判阶段的话会每小时白白采一个已定格的活动。
  */
 
 /** 从一份榜单里取某档的分数(第 tier 名的 score); 榜不足该档返回 null */
@@ -54,7 +58,9 @@ export async function sampleEventCutoffs(server: Server, eventId: number, songs:
                 score: scoreAtRank(list, tier) ?? 0,
                 recordedAt: now,
                 // 每条样本带**它自己那首歌**的上游时间, 而不是全活动取 max —— 各曲榜的刷新时间可能不同
-                upstreamAt: ranking?.fetchedAt
+                upstreamAt: ranking?.fetchedAt,
+                // 供数源也按条记录(回退链可能中途换源), 出图页脚据此标注「数据来源」
+                origin: ranking?.origin
             });
         }
     }
@@ -134,6 +140,13 @@ export function startCutoffRecorder(): void {
             try {
                 const tracking = await currentEventTracking(server);
                 if (tracking.status !== 'ok') continue;
+                // 上游在活动结束后仍把它挂在 /events/current 上: 只在**进行中**采样,
+                // 否则会一直采一个已结束的活动(榜已定格, 采到的只是重复点)。
+                // 阶段未知时保守放行(与旧行为一致) —— mayBeRunning 的语义见 types/EventPhase.ts
+                if (!mayBeRunning(tracking.track.phase)) {
+                    logger('cutoff', `[${server}] event ${tracking.track.eventId}: phase=${tracking.track.phase}, skip sampling`);
+                    continue;
+                }
                 if (!tracking.track.songs.length) continue;
                 // force: 定时采样不受查询冷却影响, 保证每个采样周期必定落点
                 const tiers = await recordEventCutoffs(server, tracking.track.eventId, tracking.track.songs, { force: true });

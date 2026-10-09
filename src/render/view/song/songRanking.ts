@@ -5,11 +5,12 @@ import { drawTitle, drawMetaBand, outputFinalBuffer, TITLE_BAND_H, META_BAND_H }
 import { drawBackground } from '../../component/background';
 import { drawServerIcon } from '../../component/serverIcon';
 import { cjkFontFamily } from '../../component/fonts';
-import { fillTextCentered } from '../../component/draw';
+import { fillTextCentered, formatDateTime } from '../../component/draw';
 
 /**
  * 歌曲排行图(**单服一图**, 前十名)。
  * 这是用户动态数据, 与「同一实体多服对比」的静态信息无关, 故不做多服行。
+ * 页脚标注实际供数的上游(回退链可能换源)与生成时间。
  */
 
 const WIDTH = 720;
@@ -17,11 +18,12 @@ const MARGIN = 16;
 /** 页头 = 主标题带 + 副信息带(国旗/服名/曲目) */
 const HEADER_H = TITLE_BAND_H + META_BAND_H;
 const ROW_H = 34;
+const FOOTER_H = 20;
 
 export async function drawSongRanking(server: Server, musicId: number, title: string, ranking: MusicRanking, compress: boolean): Promise<Array<Buffer | string>> {
     const profile = serverProfile(server);
     const entries = ranking.entries;
-    const height = HEADER_H + MARGIN + 44 + Math.max(entries.length, 1) * ROW_H + MARGIN;
+    const height = HEADER_H + MARGIN + 44 + Math.max(entries.length, 1) * ROW_H + FOOTER_H + MARGIN;
     const canvas = createCanvas(WIDTH, height);
     const ctx = canvas.getContext('2d');
 
@@ -58,7 +60,7 @@ export async function drawSongRanking(server: Server, musicId: number, title: st
         ctx.font = cjkFontFamily(15);
         ctx.fillStyle = '#8a93a0';
         ctx.fillText('该歌曲在此服务器暂无排行数据', MARGIN + 8, y + ROW_H / 2);
-        return [await outputFinalBuffer(canvas, compress)];
+        y += ROW_H;
     }
 
     for (const entry of entries) {
@@ -80,6 +82,15 @@ export async function drawSongRanking(server: Server, musicId: number, title: st
 
         y += ROW_H;
     }
+
+    // 页脚: 数据来源(实际供数的上游, 回退链中途换源时也会体现)与生成时间
+    ctx.font = cjkFontFamily(12);
+    ctx.fillStyle = '#8a93a0';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const originText = ranking.origin ? `${ranking.origin} · ` : '';
+    const scopeText = entries.length ? `歌曲排行前 ${entries.length} 名` : '暂无排行数据';
+    ctx.fillText(`数据来源：${originText}${scopeText} · 生成于 ${formatDateTime(new Date())}`, MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
 
     return [await outputFinalBuffer(canvas, compress)];
 }

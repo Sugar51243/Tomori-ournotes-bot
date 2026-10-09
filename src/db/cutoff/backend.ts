@@ -16,6 +16,8 @@ export interface CutoffRow {
     score: number;
     recordedAt?: number;
     upstreamAt?: number;
+    /** 实际供数源(回退链档案名); 老数据/旧库为 undefined */
+    origin?: string;
 }
 
 /**
@@ -25,7 +27,8 @@ export interface CutoffRow {
 export type UpsertMode = 'record' | 'merge';
 
 export interface CutoffBackend {
-    readonly kind: 'mysql' | 'sqlite' | 'memory';
+    /** remote = 数据库 API(见 src/db/cutoff/remote.ts); sqlite = 本地缓冲; memory = 进程内存兜底 */
+    readonly kind: 'remote' | 'sqlite' | 'memory';
     /** 是否真持久化(内存后端 = false); 出图页脚据此标注 */
     readonly persistent: boolean;
     upsertRows(rows: CutoffRow[], mode: UpsertMode): Promise<void>;
@@ -48,7 +51,8 @@ export function sampleToRow(server: string, eventId: number, s: CutoffSample): C
         bucket: s.bucket,
         score: s.score,
         recordedAt: s.recordedAt,
-        upstreamAt: s.upstreamAt
+        upstreamAt: s.upstreamAt,
+        origin: s.origin
     };
 }
 
@@ -73,6 +77,8 @@ export function sanitizeRow(row: CutoffRow): CutoffRow | undefined {
     if (Number.isFinite(rec)) out.recordedAt = rec;
     const up = Number(row.upstreamAt);
     if (Number.isFinite(up)) out.upstreamAt = up;
+    const origin = typeof row.origin === 'string' ? row.origin.trim() : '';
+    if (origin && origin.length <= 64) out.origin = origin;
     return out;
 }
 
@@ -90,6 +96,7 @@ interface MemoryPoint {
     score: number;
     recordedAt?: number;
     upstreamAt?: number;
+    origin?: string;
 }
 
 /**
@@ -128,7 +135,9 @@ export function createMemoryBackend(): CutoffBackend {
                     score: row.score,
                     recordedAt: row.recordedAt,
                     // upstreamAt 只在有限值时替换, 否则保留本桶已有的上游时间(与旧逻辑一致)
-                    upstreamAt: Number.isFinite(row.upstreamAt) ? row.upstreamAt : prev?.upstreamAt
+                    upstreamAt: Number.isFinite(row.upstreamAt) ? row.upstreamAt : prev?.upstreamAt,
+                    // origin 同理: 只有给了值才替换本桶已有的来源
+                    origin: row.origin ?? prev?.origin
                 });
             }
         },
@@ -141,7 +150,7 @@ export function createMemoryBackend(): CutoffBackend {
                 for (const [bucket, p] of byBucket) {
                     out.push({
                         server, eventId, musicId: Number(musicId), tier: Number(tier), bucket,
-                        score: p.score, recordedAt: p.recordedAt, upstreamAt: p.upstreamAt
+                        score: p.score, recordedAt: p.recordedAt, upstreamAt: p.upstreamAt, origin: p.origin
                     });
                 }
             }
@@ -156,7 +165,7 @@ export function createMemoryBackend(): CutoffBackend {
                     for (const [bucket, p] of byBucket) {
                         rows.push({
                             server, eventId: Number(eventId), musicId: Number(musicId), tier: Number(tier), bucket,
-                            score: p.score, recordedAt: p.recordedAt, upstreamAt: p.upstreamAt
+                            score: p.score, recordedAt: p.recordedAt, upstreamAt: p.upstreamAt, origin: p.origin
                         });
                     }
                 }

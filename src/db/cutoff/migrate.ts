@@ -4,7 +4,7 @@ import { CutoffBackend, CutoffRow, rowKey, sanitizeRow } from './backend';
 /**
  * 数据迁移/回灌:
  * - migrateMongoToBackend: MongoDB 的旧榜线文档 → 当前后端(只读源、merge 写入, 幂等)
- * - syncToMysql: SQLite 降级缓冲 → MySQL(merge 写入, 幂等)
+ * - syncToPrimary: SQLite 降级缓冲 → 远程主后端(merge 写入, 幂等)
  *
  * 都用 merge 模式 + 批内按主键去重 —— 重跑安全, 且不会用旧数据覆盖更新的数据。
  */
@@ -23,7 +23,9 @@ export function mapMongoDocToRow(doc: unknown): CutoffRow | undefined {
         bucket: Number(d.bucket),
         score: Number(d.score),
         recordedAt: d.recordedAt === undefined || d.recordedAt === null ? undefined : Number(d.recordedAt),
-        upstreamAt: d.upstreamAt === undefined || d.upstreamAt === null ? undefined : Number(d.upstreamAt)
+        upstreamAt: d.upstreamAt === undefined || d.upstreamAt === null ? undefined : Number(d.upstreamAt),
+        // 旧 Mongo 文档没有 origin; 有就带上(字符串清洗在 sanitizeRow 里)
+        origin: typeof d.origin === 'string' ? d.origin : undefined
     });
 }
 
@@ -80,8 +82,8 @@ export async function migrateMongoToBackend(
     return total;
 }
 
-/** SQLite 缓冲 → MySQL(merge 幂等; 返回写入条数) */
-export async function syncToMysql(source: CutoffBackend, target: CutoffBackend, batchSize = BATCH): Promise<number> {
+/** SQLite 缓冲 → 远程主后端(merge 幂等; 返回写入条数) */
+export async function syncToPrimary(source: CutoffBackend, target: CutoffBackend, batchSize = BATCH): Promise<number> {
     let total = 0;
     for await (const rows of source.scanAll()) {
         for (let i = 0; i < rows.length; i += batchSize) {

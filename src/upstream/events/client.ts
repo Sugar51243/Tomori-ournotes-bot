@@ -1,19 +1,25 @@
 import axios from 'axios';
 import { config } from '../../config';
 import { ttl } from '../../config/ttl';
-import { cachedFetch } from '../cachedFetch';
+import { chainFetchBuffer } from '../sources/chain';
 import { Server } from '../../features/types/Server';
 import { EventRankingSong, EventRankingTrack } from '../../features/types/EventRanking';
+import { EventPhase, adjustEventPhaseByTime, mayBeRunning, parseEventPhase } from '../../features/types/EventPhase';
 import { regionFor } from '../../db/adapter';
 import { parseGameDate } from '../../features/types/Gacha';
 
 /**
  * 活动榜线客户端(rankd 公开接口)—— 取的就是站点活动追踪器用的那几个端点:
- *   /events/current                                 当前开放的活动
+ *   /events/current                                 上游最近在追踪的活动
  *   /events/{eventId}                               单活动详情(含各挑战曲的最后取数时间)
  *   /events/{eventId}/challenges/{cmid}/ranking     单曲榜(见 src/upstream/ranking/client.ts)
  *
- * 上游只跟踪**当前开放**的活动, 没在追踪的 id 一律 404。
+ * 取数经**数据源回退链**(gameApi 角色): bdon rankd 与 haneoka.org 的 game records 是同一份数据,
+ * 主源失败时由链上的下一个源顶替(见 src/config/sources.ts)。
+ *
+ * 注意上游**活动结束后仍会把旧活动挂在 /events/current 上**(阶段变成 result/aggregation),
+ * 所以「当前有没有活动进行中」要看活动对象的 eventStatus(见 features/types/EventPhase.ts),
+ * 不能只看上游有没有返回活动。没在追踪的 id 一律 404。
  */
 
 function base(server: Server): string {
@@ -70,7 +76,8 @@ export type EventTrackingResult =
 async function fetchEvent(server: Server, path: string, key: string): Promise<EventTrackingResult> {
     let data: Buffer | undefined;
     try {
-        const res = await cachedFetch(`${base(server)}${path}`, {
+        // 走数据源回退链(角色 gameApi): 主源失败时由备用源(haneoka.org 等)顶替
+        const res = await chainFetchBuffer(`${base(server)}${path}`, {
             key,
             ttlS: ttl.rankingTtlS,
             allowStale: true,
@@ -106,13 +113,16 @@ async function fetchEvent(server: Server, path: string, key: string): Promise<Ev
         });
     }
 
+    // 阶段以 eventStatus 为准; 再用同一份数据自带的 endAt 纠偏「说进行中但已过结束时间」的陈旧副本
+    const phase = adjustEventPhaseByTime(parseEventPhase(raw.eventStatus), num(raw.endAt));
+
     return {
         status: 'ok',
-        track: { eventId, eventType: num(raw.eventType) ?? 0, songs, tracked: true }
+        track: { eventId, eventType: num(raw.eventType) ?? 0, songs, tracked: true, phase }
     };
 }
 
-/** 上游正在追踪的**当前**活动 */
+/** 上游最近在追踪的活动(**不保证还在进行中**, 看 track.phase) */
 export function currentEventTracking(server: Server): Promise<EventTrackingResult> {
     return fetchEvent(server, '/events/current', `events/${server}/current.json`);
 }
@@ -122,12 +132,32 @@ export function getEventTracking(server: Server, eventId: number): Promise<Event
     return fetchEvent(server, `/events/${eventId}`, `events/${server}/detail_${eventId}.json`);
 }
 
-/** 不传 id 时: 该服当前开放的活动(先问上游 /events/current, 再退 masterdata 的时间窗) */
-export async function resolveDefaultEventId(server: Server): Promise<number | undefined> {
-    const current = await currentEventTracking(server);
-    if (current.status === 'ok') return current.track.eventId;
+export interface CurrentEventResolution {
+    /** 此刻**进行中**的活动 id; 没有则不给(不传 id 的查询据此报「没有进行中的活动」) */
+    eventId?: number;
+    /** 上游还挂着、但已不在进行中的活动(活动结束后上游仍把它当 current), 供出错文案提示可查往期 */
+    finished?: { eventId: number; phase: EventPhase };
+}
 
-    // 上游没给(未追踪/不可用) -> 用本服 masterdata 自己找: 时间窗覆盖当下且 id 最大的那个
+/**
+ * 不传 id 时的活动解析: **只在有活动进行中时才给 id**。
+ * 先问上游 /events/current(要它确实是进行中), 再退 masterdata 时间窗兜底。
+ */
+export async function resolveCurrentEvent(server: Server): Promise<CurrentEventResolution> {
+    const current = await currentEventTracking(server);
+    if (current.status === 'ok') {
+        if (mayBeRunning(current.track.phase)) return { eventId: current.track.eventId };
+        // 上游挂着但已知不在进行中(集计中/结果公布/已结束): 记下来给文案用, 再让时间窗找找有没有别的
+        return resolveFromSchedule(server, { eventId: current.track.eventId, phase: current.track.phase as EventPhase });
+    }
+    return resolveFromSchedule(server);
+}
+
+/**
+ * 兜底: 用本服 masterdata 自己找时间窗覆盖当下、id 最大的活动。
+ * 窗口只认 [startAt, endAt] —— **不用 displayEndAt**: 结果公布期已经不是「活动进行中」了。
+ */
+async function resolveFromSchedule(server: Server, finished?: CurrentEventResolution['finished']): Promise<CurrentEventResolution> {
     const { store } = regionFor(server);
     const rows = await store.eventList().catch(() => []);
     const now = Date.now();
@@ -136,10 +166,10 @@ export async function resolveDefaultEventId(server: Server): Promise<number | un
         const id = Number(row.id);
         if (!Number.isFinite(id)) continue;
         const start = parseGameDate(String(row.startAt ?? ''), server);
-        const end = parseGameDate(String(row.displayEndAt ?? row.endAt ?? ''), server);
+        const end = parseGameDate(String(row.endAt ?? ''), server);
         if (!start || !end) continue;
         if (start.getTime() > now || end.getTime() < now) continue;
         if (best === undefined || id > best) best = id;
     }
-    return best;
+    return best === undefined ? { finished } : { eventId: best, finished };
 }

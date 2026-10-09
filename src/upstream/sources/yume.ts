@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { DataSourceProfile, SourceRole } from '../../config/sources';
+import { SourceFetchPlan } from './plan';
 
 /**
  * Project Yume(https://bdon.yatta.moe)取数方式的翻译层(纯函数, 不发起请求)。
@@ -12,11 +13,8 @@ import { DataSourceProfile, SourceRole } from '../../config/sources';
  *   (bdon 把末段重复成一层目录 `…/x/x.webp`, yume 是 `…/x.webp`; 仅对已实测验证的种类做换算)
  */
 
-export interface SourceFetchPlan {
-    url: string;
-    /** 取到的字节在返回前过一道转换(版本清单: SPA HTML → bdon 形状清单) */
-    transform?: (data: Buffer) => Buffer;
-}
+/** 取数计划形状见 ./plan.ts(与 haneoka 翻译器共用); 这里再导出一次保持既有引用不变 */
+export type { SourceFetchPlan } from './plan';
 
 /** 已实测验证可机械换算的资产种类(逻辑路径前缀); 其余种类不冒险, 交由下一个源 */
 export const YUME_ASSET_KINDS: readonly string[] = [

@@ -12,6 +12,9 @@ import { drawSongMetaList } from '../../render/view/song/songMetaList';
  *
  * 效率数值与服务器无关(同一份谱面模拟数据), 服务器的选择只决定曲名/乐团的显示语言
  * 与封面的取图区域 —— 沿用「曲目本体优先港澳台, 无则日服」的规则。
+ *
+ * 数据来源构成回退链(musicData 角色): bdon 的 music-data.json 不可用时, 备用源
+ * (haneoka.org 的「乐曲分析」)会给出**降级**数据 —— 照常出榜, 但图上注明来源与模型差异。
  */
 
 export interface SongMetaQuery {
@@ -37,7 +40,7 @@ export async function commandSongMeta(servers: Server[], query: SongMetaQuery = 
         if (song.isExist) songs.set(id, song);
     }
 
-    return drawSongMetaList(bodyServer, battle, free, songs, compress);
+    return drawSongMetaList(bodyServer, battle, free, songs, compress, { origin: data.origin, degraded: data.degraded });
 }
 
 /** 该曲本体取哪个服的数据: 输入的服按顺序优先, 其次港澳台 -> 日服 -> 其余 */

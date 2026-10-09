@@ -38,6 +38,7 @@ const DDL_SAMPLES = `CREATE TABLE IF NOT EXISTS cutoff_samples (
     score       REAL    NOT NULL,
     recorded_at INTEGER NULL,
     upstream_at INTEGER NULL,
+    origin      TEXT    NULL,
     PRIMARY KEY (server, event_id, music_id, tier, bucket)
 )`;
 
@@ -46,28 +47,31 @@ const DDL_META = `CREATE TABLE IF NOT EXISTS cutoff_meta (
     v TEXT NOT NULL
 )`;
 
-const SELECT_COLUMNS = 'server, event_id, music_id, tier, bucket, score, recorded_at, upstream_at';
+const SELECT_COLUMNS = 'server, event_id, music_id, tier, bucket, score, recorded_at, upstream_at, origin';
 
-const INSERT_COLUMNS = '(server, event_id, music_id, tier, bucket, score, recorded_at, upstream_at)';
+const INSERT_COLUMNS = '(server, event_id, music_id, tier, bucket, score, recorded_at, upstream_at, origin)';
 
-const UPSERT_RECORD = `INSERT INTO cutoff_samples ${INSERT_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+const UPSERT_RECORD = `INSERT INTO cutoff_samples ${INSERT_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(server, event_id, music_id, tier, bucket) DO UPDATE SET
     score       = excluded.score,
     recorded_at = excluded.recorded_at,
-    upstream_at = COALESCE(excluded.upstream_at, upstream_at)`;
+    upstream_at = COALESCE(excluded.upstream_at, upstream_at),
+    origin      = COALESCE(excluded.origin, origin)`;
 
 /** merge: 只在 incoming 的 recorded_at 不旧于已存值时覆盖(SET 表达式读的都是旧行, 与赋值顺序无关) */
-const UPSERT_MERGE = `INSERT INTO cutoff_samples ${INSERT_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+const UPSERT_MERGE = `INSERT INTO cutoff_samples ${INSERT_COLUMNS} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(server, event_id, music_id, tier, bucket) DO UPDATE SET
     score       = CASE WHEN IFNULL(excluded.recorded_at, 0) >= IFNULL(recorded_at, 0) THEN excluded.score ELSE score END,
     upstream_at = CASE WHEN IFNULL(excluded.recorded_at, 0) >= IFNULL(recorded_at, 0)
                        THEN COALESCE(excluded.upstream_at, upstream_at) ELSE upstream_at END,
+    origin      = CASE WHEN IFNULL(excluded.recorded_at, 0) >= IFNULL(recorded_at, 0)
+                       THEN COALESCE(excluded.origin, origin) ELSE origin END,
     recorded_at = CASE WHEN IFNULL(excluded.recorded_at, 0) >= IFNULL(recorded_at, 0) THEN excluded.recorded_at ELSE recorded_at END`;
 
 function toParams(row: CutoffRow): Array<string | number | null> {
     return [
         row.server, row.eventId, row.musicId, row.tier, row.bucket, row.score,
-        row.recordedAt ?? null, row.upstreamAt ?? null
+        row.recordedAt ?? null, row.upstreamAt ?? null, row.origin ?? null
     ];
 }
 
@@ -84,6 +88,7 @@ function toRow(raw: Record<string, unknown>): CutoffRow {
     };
     if (raw.recorded_at !== null && raw.recorded_at !== undefined) out.recordedAt = Number(raw.recorded_at);
     if (raw.upstream_at !== null && raw.upstream_at !== undefined) out.upstreamAt = Number(raw.upstream_at);
+    if (raw.origin !== null && raw.origin !== undefined) out.origin = String(raw.origin);
     return out;
 }
 
@@ -105,6 +110,11 @@ export async function tryOpenSqliteBackend(file: string): Promise<CutoffBackend 
         db.pragma('busy_timeout = 5000');
         db.exec(DDL_SAMPLES);
         db.exec(DDL_META);
+        // 老库的 cutoff_samples 没有 origin 列(CREATE TABLE IF NOT EXISTS 不会补列): 就地补一列。
+        // 列已存在(新库)会抛 duplicate column name, 属于预期路径, 忽略即可。
+        try {
+            db.exec('ALTER TABLE cutoff_samples ADD COLUMN origin TEXT NULL');
+        } catch { /* 列已存在 */ }
     } catch (e) {
         logger('cutoff', `sqlite open failed (${file}): ${e instanceof Error ? e.message : e}`);
         return undefined;

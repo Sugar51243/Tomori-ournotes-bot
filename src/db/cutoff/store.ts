@@ -4,15 +4,16 @@ import { Server } from '../../features/types/Server';
 import { CutoffMeta, CutoffSample, CutoffSeries, CutoffTier } from '../../features/types/Cutoff';
 import { CutoffRow } from './backend';
 import { CutoffRuntime } from './runtime';
-import { tryOpenMysqlBackend } from './mysql';
+import { tryOpenRemoteBackend } from './remote';
 import { tryOpenSqliteBackend } from './sqlite';
 import { closeMongo, cutoffsForMigration } from '../mongo';
 
 /**
  * 榜线历史的存取。
  *
- * 存储优先级: MySQL(config 的 MYSQL_* 配置且可连; 库不存在会自动创建) → SQLite 文件兜底
- * (MySQL 不可用时写入, 恢复后自动回灌) → 进程内存(前两者都不可用; 重启会遗忘, 出图页脚会标注)。
+ * 存储优先级: 数据库 API(config 的 DB_API_BASE_URL 配置且可连; 建表在那边自动完成) →
+ * SQLite 文件兜底(远程端不可用时写入, 恢复后自动回灌) → 进程内存(前两者都不可用;
+ * 重启会遗忘, 出图页脚会标注)。
  * 首次启动会把 MongoDB `cutoffs` 集合里的旧数据只读迁移到当前存储, Mongo 原数据保留不动。
  */
 
@@ -21,16 +22,9 @@ let runtime: CutoffRuntime | undefined;
 function getRuntime(): CutoffRuntime {
     runtime ??= new CutoffRuntime({
         log: m => logger('cutoff', m),
-        mysqlConfigured: () => !!config.mysqlHost,
-        openMysql: () => config.mysqlHost
-            ? tryOpenMysqlBackend({
-                host: config.mysqlHost,
-                port: config.mysqlPort,
-                user: config.mysqlUser,
-                password: config.mysqlPassword,
-                database: config.mysqlDatabase,
-                connectTimeoutMs: config.dbConnectTimeoutMs
-            })
+        primaryConfigured: () => !!config.dbApiBaseUrl,
+        openPrimary: () => config.dbApiBaseUrl
+            ? tryOpenRemoteBackend()
             : Promise.resolve(undefined),
         openSqlite: () => tryOpenSqliteBackend(config.sqlitePath),
         mongo: config.mongoUri ? {
@@ -95,7 +89,7 @@ export async function loadCutoffs(server: Server, eventId: number, tiers?: Cutof
             s = { musicId: Number(row.musicId), tier: Number(row.tier) as CutoffTier, points: [] };
             grouped.set(key, s);
         }
-        s.points.push({ at: Number(row.bucket), score: Number(row.score) });
+        s.points.push({ at: Number(row.bucket), score: Number(row.score), origin: row.origin });
     };
 
     const rows = await getRuntime().load(server, eventId);

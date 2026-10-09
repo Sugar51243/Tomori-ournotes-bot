@@ -3,7 +3,7 @@
  *
  * 机制层: 经 sources/chain 落到 http / cachedFetch(失败抛出、ETag 重验证、stale 回退、
  * 单飞合并、按 host 限流与重试行为不变), 并按「主源 → 备用源 → bdon.moe 兜底」回退;
- * 磁盘缓存键按源前缀隔离。
+ * 磁盘缓存键按源前缀隔离, 结果带 origin(实际供数的源名)供出图标注「数据来源」。
  * 转换层: 新数据源的 URL/数据格式翻译在各 sources 模块里完成, 由本模块统一调度;
  * fetchJSONConverted 是通用的「上游原始形状 -> 应用内部形状」转换入口。
  * 门面层: 具名 re-export 各领域客户端(events/ranking/musicData/player/chart/...)。
@@ -11,7 +11,7 @@
 import type { CachedFetchOptions, FetchedBuffer } from './cachedFetch';
 import { http, HttpStatusError } from './http';
 import {
-    chainFetchBuffer, chainFetchJSON, chainImageBuffer, chainRequestJSON, UpstreamCrashedError
+    chainFetchBuffer, chainFetchJSON, chainImageBuffer, chainRequestJSON, chainRequestJSONWithOrigin, UpstreamCrashedError
 } from './sources/chain';
 
 export type { CachedFetchOptions, FetchedBuffer };
@@ -35,6 +35,11 @@ export async function fetchJSONConverted<TRaw, TApp>(
 /** 不走磁盘缓存/ETag 的直接 GET(如带 Authorization 的账号查询); 失败抛出 */
 export function requestJSON<T>(url: string, options?: { headers?: Record<string, string>; retries?: number }): Promise<T> {
     return chainRequestJSON<T>(url, options);
+}
+
+/** requestJSON 的带 origin 版: 同时返回实际供数的源名(出图标注「数据来源」用) */
+export function requestJSONWithOrigin<T>(url: string, options?: { headers?: Record<string, string>; retries?: number }): Promise<{ data: T; origin: string }> {
+    return chainRequestJSONWithOrigin<T>(url, options);
 }
 
 /** 不走磁盘缓存的直接 GET(原始字节) */
@@ -63,8 +68,8 @@ export { getNoteSkin } from './noteSkin';
 export type { NoteSkin, SpriteDef, SpriteRect, NoteBodySprites } from './noteSkin';
 export { listAnnouncements, getAnnouncement } from './announcements/client';
 export type { AnnouncementListResult } from './announcements/client';
-export { currentEventTracking, getEventTracking, resolveDefaultEventId } from './events/client';
-export type { EventTrackingResult, RawTrackedEvent } from './events/client';
+export { currentEventTracking, getEventTracking, resolveCurrentEvent } from './events/client';
+export type { EventTrackingResult, RawTrackedEvent, CurrentEventResolution } from './events/client';
 export { getMusicRanking, getChallengeRanking, fetchedAtFromEtag } from './ranking/client';
 export {
     getMusicData, rateOf, perMinuteOf, rankCharts, recommendCharts,

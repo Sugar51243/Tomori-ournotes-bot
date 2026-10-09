@@ -22,6 +22,13 @@ export const ttl = {
     musicDataTtlS: 86400,
     /** 玩家档案缓存(仅进程内, 不落盘) */
     playerTtlS: 300,
+    /**
+     * 网页平台的账号包查询(仅进程内; 见 src/webPlatform/client.ts)。
+     * 压到 60s: 账号包是快照、本身不重要, 但**公开开关的变更要尽快见效**(隐藏后别再多显示 5 分钟)。
+     */
+    webAccountTtlS: 60,
+    /** 网页平台的 master bundle(组卡查表用; 按主数据版本变, 一天一问足够) */
+    masterBundleTtlS: 86400,
     /** 关键词内存快照的兜底 TTL(上传/删除会主动强刷, 这里只兜底多进程/多实例场景) */
     keywordCacheTtlS: 60
 } as const;

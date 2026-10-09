@@ -8,7 +8,9 @@ import { drawBackground } from '../../component/background';
 import { drawServerIcon } from '../../component/serverIcon';
 import { fillTextCentered, formatAgo, formatDateTime } from '../../component/draw';
 import { cjkFontFamily } from '../../component/fonts';
+import { isEventNotRunning } from '../../../features/types/EventPhase';
 import { eventAssetImage } from './eventArt';
+import { endedPhaseNote, phaseTitleSuffix } from './phaseNote';
 
 /**
  * 活动榜线图(**单服一图**)。
@@ -190,7 +192,10 @@ export async function drawEventRanking(
 ): Promise<Array<Buffer | string>> {
     const shown = sections.slice(0, MAX_SECTIONS);
     const extra = sections.slice(MAX_SECTIONS);
+    const phase = event.phase();
     const footNotes = [...notes];
+    // 已结束/集计中/结果公布: 图上标出阶段并说明数据是上游保留的(进行中/未知不标)
+    if (isEventNotRunning(phase)) footNotes.unshift(endedPhaseNote(phase, '榜单为上游保留的数据'));
     if (extra.length) footNotes.push(`另有 ${extra.length} 首榜单超出单图上限, 未显示`);
 
     const bodyH = shown.length
@@ -203,7 +208,7 @@ export async function drawEventRanking(
     // 背景按活动相关团选(与活动详情页同款)
     await drawBackground(ctx, WIDTH, height, { server, bandId: event.backgroundBandId() });
     const tierText = tierWindow && tierWindow.start > 1 ? ` · 第 ${tierWindow.start}~${tierWindow.end} 名` : '';
-    drawTitle(ctx, WIDTH, `活动歌榜${tierText}`);
+    drawTitle(ctx, WIDTH, `活动歌榜${tierText}${phaseTitleSuffix(phase)}`);
 
     // 副信息带: 国旗 + 服名 + 活动 ID + 种类
     const metaMidY = drawMetaBand(ctx, WIDTH);
@@ -246,7 +251,11 @@ export async function drawEventRanking(
     const sourceText = tierWindow && tierWindow.start > 1
         ? `第 ${tierWindow.start}~${tierWindow.end} 名`
         : `前 ${MAX_ROWS} 名`;
-    ctx.fillText(`数据来源：上游各曲当前排行${sourceText} · 生成于 ${formatDateTime(new Date(now))}`, MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
+    const sourceKind = isEventNotRunning(phase) ? '保留的' : '当前';
+    // 实际供数的上游(回退链可能换源): 取各段榜单的 origin 去重 —— 中途换源时会把两家都列出
+    const origins = [...new Set(shown.map(s => s.ranking.origin).filter((o): o is string => !!o))];
+    const originText = origins.length ? `${origins.join(' / ')} · ` : '';
+    ctx.fillText(`数据来源：${originText}上游各曲${sourceKind}排行${sourceText} · 生成于 ${formatDateTime(new Date(now))}`, MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
     y += FOOTER_H;
     for (const note of footNotes) {
         // 未收录曲目的 id 可能一次列好几个, 必须限宽

@@ -9,7 +9,7 @@
 export type SourceRole = 'meta' | 'asset' | 'gameApi' | 'site' | 'musicData' | 'chartSite';
 
 /** URL 布局方言: 'bdon' = 规范化布局(恒等); 其它由 upstream/sources/ 下的翻译器处理 */
-export type SourceLayout = 'bdon' | 'yume';
+export type SourceLayout = 'bdon' | 'yume' | 'haneoka';
 
 export interface DataSourceProfile {
     /** URL 布局方言 */
@@ -58,6 +58,26 @@ export const DATA_SOURCES: Readonly<Record<string, DataSourceProfile>> = {
         moenotesSiteBase: '',
         musicDataUrl: '',
         versionSourceUrl: 'https://bdon.yatta.moe/info/characters'
+    },
+    /**
+     * haneoka.org(BanG Dream! Our Notes 数据库, https://haneoka.org)。
+     * 承担 gameApi(活动/曲榜排行)、site(玩家查询)与 musicData(乐曲分析)三个角色:
+     * - gameApi/site 与 bdon rankd 是**同一份数据**(逐条比对过), 等价可替换;
+     * - 玩家查询能查任意日服玩家(比站点公开接口宽);
+     * - musicData 是**降级模型**: 站点「乐曲分析」直接给效率/物量等结果, 没有 bdon
+     *   music-data.json 的种子模型(技能权重/评级门槛), 详情见 upstream/sources/haneoka.ts。
+     *
+     * ⚠ 剧透(超前内容): 上游作者声明不可接入超前内容 —— 本档案只访问**发行数据集**
+     * (catalog 固定 intl, game records 只用 tw/jp/kr/en), 从不请求 -cbt/-test 数据集。
+     */
+    'haneoka.org': {
+        layout: 'haneoka',
+        roles: ['gameApi', 'site', 'musicData'],
+        metaBase: '',
+        assetBase: '',
+        gameApiBase: 'https://haneoka.org',
+        moenotesSiteBase: 'https://haneoka.org',
+        musicDataUrl: ''
     }
 };
 

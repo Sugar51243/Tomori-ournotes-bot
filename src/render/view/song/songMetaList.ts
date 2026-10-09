@@ -138,7 +138,9 @@ export async function drawSongMetaList(
     battle: EfficiencyRow[],
     free: EfficiencyRow[],
     songs: Map<number, Song>,
-    compress: boolean
+    compress: boolean,
+    /** 数据来源: origin = 实际供数的源(出图页脚标注); degraded = 备用源的替代模型(见 upstream/musicData/client.ts) */
+    source: { origin?: string; degraded?: boolean } = {}
 ): Promise<Array<Buffer | string>> {
     const height = HEADER_H + MARGIN
         + sectionHeight(battle.length) + sectionHeight(free.length)
@@ -157,8 +159,11 @@ export async function drawSongMetaList(
     fillTextCentered(ctx, profile.displayName, MARGIN + 28, metaMidY, 160);
     let hx = MARGIN + 28 + ctx.measureText(profile.displayName).width + 14;
     ctx.font = cjkFontFamily(13);
-    ctx.fillStyle = '#9aa4b2';
-    fillTextCentered(ctx, `四难度混排 · 技能全 ${DEFAULT_SKILL_PERCENT}% · 结算耗时 ${OVERHEAD_MS / 1000}s`, hx, metaMidY, WIDTH - MARGIN - hx);
+    ctx.fillStyle = source.degraded ? '#e0b36a' : '#9aa4b2';
+    const headerNote = source.degraded
+        ? `四难度混排 · 备用源降级数据（站点「乐曲分析」模型）`
+        : `四难度混排 · 技能全 ${DEFAULT_SKILL_PERCENT}% · 结算耗时 ${OVERHEAD_MS / 1000}s`;
+    fillTextCentered(ctx, headerNote, hx, metaMidY, WIDTH - MARGIN - hx);
 
     let y = HEADER_H + MARGIN;
     y = await drawBoard(ctx, '击奏live 效率 Top 15', battle, songs, y);
@@ -168,8 +173,11 @@ export async function drawSongMetaList(
     ctx.fillStyle = '#8a93a0';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`效率 = 期望分/综合力 ÷ (BGM 时长 + ${OVERHEAD_MS / 1000}s 结算耗时)；出分 = 分/综合力；时长取 BGM 时长；数据与站点「歌曲meta」同源`,
-        MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
+    const sourceName = source.origin ?? 'bdon.moe';
+    const footer = source.degraded
+        ? `数据来源：${sourceName}「乐曲分析」（站点模型：效率/出分取自该站结果；未计技能加成、无评级门槛，与 bdon music-data 口径不同、不可直接比较）`
+        : `效率 = 期望分/综合力 ÷ (BGM 时长 + ${OVERHEAD_MS / 1000}s 结算耗时)；出分 = 分/综合力；时长取 BGM 时长；数据来源：${sourceName}（music-data.json）`;
+    ctx.fillText(footer, MARGIN, y + FOOTER_H / 2, WIDTH - MARGIN * 2);
 
     return [await outputFinalBuffer(canvas, compress)];
 }

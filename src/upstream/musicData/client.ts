@@ -1,6 +1,6 @@
 import { config } from '../../config';
 import { ttl } from '../../config/ttl';
-import { cachedFetch } from '../cachedFetch';
+import { chainFetchBuffer } from '../sources/chain';
 import { logger } from '../../logger';
 import { MusicData, MusicDataChartStat, MusicDataScoreRank, EfficiencyRow, RecommendRow } from '../../features/types/MusicData';
 
@@ -9,6 +9,10 @@ import { MusicData, MusicDataChartStat, MusicDataScoreRank, EfficiencyRow, Recom
  *
  * 原始文件约 13MB(85 首歌 × 4 难度, 每张谱面带全量模拟种子), 解析后只保留
  * 出图需要的字段 —— 完整 JSON 对象(上百 MB)不能常驻内存。
+ *
+ * 取数经**数据源回退链**(角色 musicData)。备用源(如 haneoka.org 的「乐曲分析」)没有
+ * 种子模型, 只能提供**降级**数据(权重为空/无评级门槛) —— 由 MusicData.degraded 标记,
+ * 消费方按它分流(歌曲meta 照常出榜并注明来源; 推荐曲/组卡器必须拒绝降级数据)。
  */
 
 /** 站点使用的默认结算耗时(秒): 效率分母 = BGM 时长 + 每局额外耗时 */
@@ -158,7 +162,7 @@ export async function getMusicData(): Promise<MusicData | undefined> {
     if (cached) return cached;
     if (!inflight) {
         inflight = (async () => {
-            const res = await cachedFetch(config.musicDataUrl, {
+            const res = await chainFetchBuffer(config.musicDataUrl, {
                 key: 'music-data/music-data.json',
                 ttlS: ttl.musicDataTtlS,
                 allowStale: true,
@@ -169,8 +173,17 @@ export async function getMusicData(): Promise<MusicData | undefined> {
                 const raw = JSON.parse(res.data.toString('utf8')) as RawMusicData;
                 if (!Array.isArray(raw.songs)) return undefined;
                 const charts = compact(raw, plainKindId(raw));
-                cached = { format: String(raw.format ?? ''), charts, power: typeof raw.power === 'number' ? raw.power : (raw.power?.power ?? raw.deck?.model?.power ?? 0) };
-                logger('musicData', `parsed ${charts.length} chart stats (${(res.data.length / 1024 / 1024).toFixed(1)}MB raw)`);
+                // 降级判定(来源无关): 有谱面却没有任何技能权重 ⟹ 种子模型缺席, 是替代源的降级数据
+                const degraded = charts.length > 0
+                    && !charts.some(c => (c.battle?.weights.length ?? 0) > 0 || (c.free?.weights.length ?? 0) > 0);
+                cached = {
+                    format: String(raw.format ?? ''),
+                    charts,
+                    power: typeof raw.power === 'number' ? raw.power : (raw.power?.power ?? raw.deck?.model?.power ?? 0),
+                    origin: res.origin,
+                    degraded
+                };
+                logger('musicData', `parsed ${charts.length} chart stats (${(res.data.length / 1024 / 1024).toFixed(1)}MB raw) from ${res.origin ?? 'direct'}${degraded ? ' [degraded: no skill weights]' : ''}`);
                 return cached;
             } catch (e) {
                 logger('musicData', `parse failed: ${e instanceof Error ? e.message : e}`);

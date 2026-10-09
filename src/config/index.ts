@@ -1,6 +1,6 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
-import { DATA_SOURCES, DEFAULT_DATA_SOURCE, FALLBACK_DATA_SOURCE } from './sources';
+import { DATA_SOURCES, DEFAULT_DATA_SOURCE, FALLBACK_DATA_SOURCE, SourceRole } from './sources';
 
 dotenv.config();
 
@@ -63,6 +63,19 @@ const sourceChain = resolveSourceChain([dataSource, backupSource]);
 const canonical = DATA_SOURCES[FALLBACK_DATA_SOURCE];
 const trimSlash = (s: string): string => s.replace(/\/+$/, '');
 
+// ---- 玩家查询优先源(PLAYER_SOURCE, 可选) ----
+// 玩家查询对应「site」角色: 把该源挪到 site 角色链首(其余顺序不变)。例: haneoka.org 能查任意日服玩家,
+// 而站点公开接口只收录已绑定账号 —— 置顶它可以省掉一次注定 404 的请求。留空 = 完全按通用链顺序。
+const playerSource = envStr('PLAYER_SOURCE', '');
+if (playerSource && !DATA_SOURCES[playerSource]) {
+    console.warn(`[config] 未知的玩家查询源 "${playerSource}", 已忽略`);
+} else if (playerSource && !DATA_SOURCES[playerSource].roles.includes('site')) {
+    console.warn(`[config] 玩家查询源 "${playerSource}" 不承担 site(玩家/站点)角色, 该设置不会生效`);
+}
+const sourceChainByRole: Partial<Record<SourceRole, string[]>> = playerSource && DATA_SOURCES[playerSource]
+    ? { site: [playerSource, ...sourceChain.filter(n => n !== playerSource)] }
+    : {};
+
 // ---- 默认服务器回退链(原始字符串; 归一/去重/补全见 features/types/Server.ts serverChainList) ----
 const serverChain = envStr('DEFAULT_SERVER_CHAIN', 'tw,jp,kr,en')
     .split(',').map(s => s.trim()).filter(Boolean);
@@ -78,6 +91,10 @@ export const config = {
     backupSource,
     /** 解析后的尝试顺序(去重, 恒以 bdon.moe 收尾) */
     sourceChain,
+    /** 玩家查询优先源(PLAYER_SOURCE 原文; 为空 = 跟随通用链) */
+    playerSource,
+    /** 按数据角色覆盖尝试顺序(目前只有 site = 玩家查询; 见 PLAYER_SOURCE) */
+    sourceChainByRole,
     metaBase: trimSlash(canonical.metaBase),
     assetBase: trimSlash(canonical.assetBase),
     /** rankd 游戏数据(公告/排行): 公开只读, 无鉴权 */
@@ -87,6 +104,12 @@ export const config = {
     /** 可选的 moenotes-api 自建网关(能查任意玩家); 未配置时玩家查询回退站点公开接口 */
     moenotesApiBase: envStr('MOENOTES_API_BASE', '').replace(/\/+$/, ''),
     moenotesApiKey: envStr('MOENOTES_API_KEY', ''),
+    /**
+     * 网页平台(web/) 的地址 —— 账号包查询与 bot 绑定码兑换走它的 /api/bot/*。
+     * 与网页的 WEB_BOT_TOKEN 必须填同一个值, 否则账号包相关功能按「未对接」处理。
+     */
+    webPlatformBase: envStr('WEB_PLATFORM_BASE', 'http://127.0.0.1:3003').replace(/\/+$/, ''),
+    webPlatformToken: envStr('WEB_PLATFORM_TOKEN', ''),
     cacheDir: path.resolve(envStr('CACHE_DIR', './cache')),
     /**
      * 默认服务器回退链(逗号分隔; 首项即默认服)。
@@ -140,15 +163,15 @@ export const config = {
     mongoDb: envStr('MONGODB_DB', 'tomori'),
     dbConnectTimeoutMs: envInt('DB_CONNECT_TIMEOUT_MS', 3000),
     /**
-     * 榜线历史的 MySQL(优先存储; 与 ENABLE_DB 无关)。
-     * MYSQL_HOST 为空 = 不启用 MySQL, 直接用 SQLite 兜底; 库不存在时自动 CREATE DATABASE
-     * IF NOT EXISTS(只建库, 不建用户), 建不了则回退 SQLite。
+     * 数据库 API(榜线历史的优先存储; 与 ENABLE_DB 无关)。
+     * 数据库凭据与全部 SQL 都在该服务里, 本进程只发语义化请求。
+     * DB_API_BASE_URL 为空 = 不启用远程存储, 直接用 SQLite 兜底;
+     * 连不上/超时同样回退 SQLite, 由运行时的恢复探测自动切回并回灌。
      */
-    mysqlHost: envStr('MYSQL_HOST', ''),
-    mysqlPort: envInt('MYSQL_PORT', 3306),
-    mysqlUser: envStr('MYSQL_USER', ''),
-    mysqlPassword: envStr('MYSQL_PASSWORD', ''),
-    mysqlDatabase: envStr('MYSQL_DATABASE', 'tomori'),
+    dbApiBaseUrl: envStr('DB_API_BASE_URL', '').replace(/\/+$/, ''),
+    dbApiToken: envStr('DB_API_TOKEN', ''),
+    /** 单次请求超时(毫秒); 超时按不可用处理, 由上层降级 */
+    dbApiTimeoutMs: envInt('DB_API_TIMEOUT_MS', 10000),
     /** 榜线历史的 SQLite 回退/缓冲文件(MySQL 不可用时写入, 恢复后自动回灌); 解析方式同 cacheDir */
     sqlitePath: path.resolve(envStr('SQLITE_PATH', './data/tomori.sqlite')),
     /** 车站房间有效期(秒): 默认同 tsugu 的 150 秒 */

@@ -2,11 +2,14 @@ import { isInteger } from '../../search/fuzzySearch';
 import { Server, withServer } from '../types/Server';
 import { Event } from '../types/Event';
 import { Song } from '../types/Song';
+import { EventPhase } from '../types/EventPhase';
+import { formatGameDate } from '../types/Gacha';
 import { regionFor } from '../../db/adapter';
-import { getEventTracking, resolveDefaultEventId } from '../../upstream/adapter';
+import { getEventTracking, resolveCurrentEvent } from '../../upstream/adapter';
 import { getChallengeRanking, getMusicRanking } from '../../upstream/adapter';
 import { ChallengeRanking } from '../types/EventRanking';
 import { searchEvents, textToFuzzyResult } from '../../search/search';
+import { noCurrentEventText } from './currentEvent';
 import { drawEventList } from '../../render/view/event/eventList';
 import { drawEventRanking, EventRankingSection } from '../../render/view/event/eventRanking';
 
@@ -15,7 +18,9 @@ import { drawEventRanking, EventRankingSection } from '../../render/view/event/e
  *
  * 这是**用户动态数据**, 与「同一实体多服对比」的静态信息不同 —— 一次只查一个服,
  * 服务器取 `displayedServerList` 的**首个**(单值即该服), **不允许回退**;
- * 活动 id 不传时取该服**当前开放的活动**。
+ * 活动 id 不传时取该服**当前进行中**的活动(上游在活动结束后仍会挂着旧活动, 见
+ * upstream/events/client.ts; 此刻没有进行中的活动就**报错**, 不拿已结束的充数)。
+ * 显式带 id 时不受限制: 已结束/集计中/结果公布照常出图并在图上标注阶段, 尚未开始则提示没有数据。
  *
  * 路由(routers/event/eventRanking.ts)挂两个路径:
  * - `/eventSongRanking` —— 正名(活动歌榜)
@@ -51,9 +56,10 @@ export interface EventRankingQuery {
 export async function commandEventRanking(server: Server, query: EventRankingQuery = {}): Promise<Array<Buffer | string>> {
     const { rank, compress = false } = query;
 
-    // ---- 活动解析: id 传文本时走模糊搜索(命中多个出活动列表图, 与查活动同款), 否则按 id; 不传取当前活动 ----
+    // ---- 活动解析: id 传文本时走模糊搜索(命中多个出活动列表图, 与查活动同款), 否则按 id; 不传取当前进行中的活动 ----
     const rawId = query.eventId ?? query.id;
     let wanted: number | undefined;
+    let finished: { eventId: number; phase: EventPhase } | undefined;
     if (rawId !== undefined && !isInteger(String(rawId))) {
         const matches = await textToFuzzyResult(server, String(rawId));
         if (Object.keys(matches).length === 0) return ['错误: 没有有效的关键词'];
@@ -61,11 +67,15 @@ export async function commandEventRanking(server: Server, query: EventRankingQue
         if (hits.length === 0) return ['没有搜索到符合条件的活动'];
         if (hits.length > 1) return drawEventList(server, hits, compress);
         wanted = hits[0].eventId;
+    } else if (rawId === undefined) {
+        const current = await resolveCurrentEvent(server);
+        wanted = current.eventId;
+        finished = current.finished;
     } else {
-        wanted = rawId === undefined ? await resolveDefaultEventId(server) : parseInt(String(rawId), 10);
+        wanted = parseInt(String(rawId), 10);
     }
     if (wanted === undefined || !Number.isFinite(wanted)) {
-        return ['错误: 该服务器当前没有开放的活动'];
+        return [noCurrentEventText(server, finished, '歌榜')];
     }
     // 榜线档位: 不传 = 前 10(原来的行为); 传了则取「到该名次为止的 10 名」
     const tier = rank === undefined ? 10 : Number(rank);
@@ -76,6 +86,14 @@ export async function commandEventRanking(server: Server, query: EventRankingQue
     if (!event.isExist) return ['错误: 该活动不存在'];
 
     const tracking = await getEventTracking(server, wanted);
+    event.upstreamPhase = tracking.status === 'ok' ? tracking.track.phase : undefined;
+    const phase = event.phase();
+    // 尚未开始: 上游必然没有榜单数据, 直接说清楚; 已结束/集计中/结果公布照常出图(数据仍有价值),
+    // 由出图在标题与页脚标注阶段
+    if (phase === 'feature') {
+        return [`错误: 该活动尚未开始${event.startAt ? `（${formatGameDate(event.startAt, server)} 开始）` : ''}，暂无榜单数据`];
+    }
+
     const { store } = regionFor(server);
     const notes: string[] = [];
 
@@ -118,7 +136,7 @@ export async function commandEventRanking(server: Server, query: EventRankingQue
     // 取前 `tier` 名(上游每曲最多前 100), 再截取「往上 10 名」的那一段。
     const fetched: ChallengeRanking[] = await Promise.all(sections.map(s => s.challengeMusicId !== undefined
         ? getChallengeRanking(server, wanted, s.challengeMusicId, tier)
-        : getMusicRanking(server, s.musicId, tier).then(r => ({ entries: r.entries }))));
+        : getMusicRanking(server, s.musicId, tier).then(r => ({ entries: r.entries, origin: r.origin }))));
 
     // 数据支持哪些档位: 任一曲的榜长达到该档就算(需求: 数据不支持的档位就不适配)
     const maxRank = Math.max(0, ...fetched.map(f => f.entries.length));
@@ -129,7 +147,12 @@ export async function commandEventRanking(server: Server, query: EventRankingQue
 
     sections.forEach((section, i) => {
         const all = fetched[i].entries;
-        section.ranking = { server, musicId: section.musicId, entries: all.slice(Math.max(0, tier - TIER_WINDOW), tier) };
+        // 重建 ranking 时**别丢 origin**(与 fetchedAt): 出图页脚要标注实际供数的源
+        section.ranking = {
+            server, musicId: section.musicId,
+            entries: all.slice(Math.max(0, tier - TIER_WINDOW), tier),
+            origin: fetched[i].origin
+        };
         section.errorKind = fetched[i].errorKind;
         // 该曲榜不足这个档 -> 这一段标注出来(其它曲照常画)
         if (all.length < tier) section.errorKind = section.errorKind ?? 'tier_not_collected';

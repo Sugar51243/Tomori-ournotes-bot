@@ -42,7 +42,9 @@
 
 ## 4. 数据来源
 
-项目数据皆源于`bdon.moe`及其子域/副网点
+项目数据源于`bdon.moe`及其子域/副网点，可选备用源 [haneoka.org](https://haneoka.org)（活动/曲榜排行、玩家查询与乐曲分析；只访问发行数据集，不接超前内容）。出图与接口会标注实际供数的来源。
+
+**网页平台（`web/`）对接**（可选，`WEB_PLATFORM_*`，见 [doc/config.md](doc/config.md) 的「网页平台对接」节）：查玩家会附带网页账号包数据（歌曲完成状态、乐队道具、各乐队理论最高综合力队伍），并提供查名片、B25、组卡工具与玩家绑定；两个项目以 HTTP API 交接，展示范围遵循网页的公开开关（绑定本人也一样）。
 
 - 数据**实时代理**，本仓库**不打包任何官方素材**；素材版权归 Bushiroad / 官方所有
 - 对上游**礼貌限流**：每主机并发 4、间隔 100ms
@@ -57,7 +59,7 @@
 - **开发依赖**：`typescript` / `tsx` / `@types/node` / `@types/express`
 - **系统字体**（出图必需）：中文走 `Microsoft YaHei`，符号与 emoji 回退 `Segoe UI Symbol` / `Segoe UI Emoji`。**Linux 部署需自备中文字体**，否则出图中文异常
 - **MongoDB**：可选，仅交友/车站/关键词需要（见 [doc/community.md](doc/community.md)）
-- **网络**：需能访问 `metadata.bdon.moe`、`assets.bdon.moe`、`api.bdon.moe`（公告/排行）、`storage.bdon.moe`（歌曲meta 的谱面效率数据）与 `bdon.moe`（账号查询与国旗图标）
+- **网络**：需能访问 `metadata.bdon.moe`、`assets.bdon.moe`、`api.bdon.moe`（公告/排行）、`storage.bdon.moe`（歌曲meta 的谱面效率数据）与 `bdon.moe`（账号查询与国旗图标）；选了 `haneoka.org` 作为数据源时还需能访问 `haneoka.org`
 
 ### 部署步骤
 

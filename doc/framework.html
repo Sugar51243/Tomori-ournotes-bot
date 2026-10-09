@@ -5471,7 +5471,8 @@
         <ul>
           <li>&bull; 主源 DATA_SOURCE → 备用源 BACKUP_SOURCE → bdon.moe 兜底（去重）</li>
           <li>&bull; 任一源失败（含 404）即回退；全败时 4xx 原样抛出，否则报「上游崩溃」</li>
-          <li>&bull; Project Yume 只承担 master 表与图片，其余角色由 bdon 承担</li>
+          <li>&bull; 每个源只参与自己声明的角色：Project Yume 管 master 表与图片；haneoka.org 管活动/曲榜排行、玩家查询与乐曲分析（降级模型）；其余角色由 bdon 承担</li>
+          <li>&bull; 活动/曲榜/玩家/效率数据都过链；结果带 origin，出图标注「数据来源」</li>
         </ul>
       </div>
 

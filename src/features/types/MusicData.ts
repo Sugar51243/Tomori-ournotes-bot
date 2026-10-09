@@ -45,6 +45,14 @@ export interface MusicData {
     charts: MusicDataChartStat[];
     /** 模型综合力(得分基准) */
     power: number;
+    /** 实际供数的数据源档案名(如 'bdon.moe' / 'haneoka.org'); 出图标注「数据来源」用 */
+    origin?: string;
+    /**
+     * 降级数据: 没有任何技能权重(种子模型缺席, 来自备用源的替代模型, 如 haneoka 的「乐曲分析」)。
+     * 效率榜照常可用(权重为空 = 技能不影响出分), 但**评级门槛也没有** ——
+     * 依赖门槛/权重的消费方(活动推荐曲、网页组卡器)必须拒绝降级数据。
+     */
+    degraded?: boolean;
 }
 
 /** 榜单上的一行: 谱面 + 算好的效率值与站点那套派生值(后者只算不画) */

@@ -25,6 +25,11 @@ export interface PlayerProfile {
     profileCardUrls: string[];
     /** 上游取数时间(毫秒) */
     fetchedAt?: number;
+    /**
+     * 实际供数的数据源: 站点路径是档案名(如 'bdon.moe' / 'haneoka.org', 由回退链标出);
+     * 自建网关路径固定为「自建网关」(不进链)。出图标注「数据来源」用。
+     */
+    origin?: string;
 }
 
 /** 数据源: 自建网关能查任意玩家, 站点公开接口只能查「已绑定且已公开」的账号 */
@@ -35,11 +40,18 @@ export class PlayerNotFoundError extends Error {
     /**
      * 站点路径查不到时**优先**给出「去站点绑定并公开」的指引 —— 这是现在查不到的最主要原因;
      * 自建网关能查任意玩家, 它还查不到就说明 ID 确实不存在, 不该再让人去绑定。
+     *
+     * 站点路径已并入数据源回退链(见 upstream/player/client.ts): 链上有数源的账号都查不到才走到这里。
+     * `unavailableSources` = 本次查询中硬失败(5xx/网络)的源 —— 404 只是最后一个源的结论,
+     * 在这些源挂掉时「查不到」不代表账号不存在, 文案要点名说清楚(如优先的 haneoka.org 故障时)。
      */
-    constructor(source: PlayerSource = 'site') {
+    constructor(source: PlayerSource = 'site', unavailableSources: readonly string[] = []) {
+        const bind = `可到 ${ACCOUNT_BIND_URL} 添加并验证游戏账号、把个人主页设为「公开」后再试（公开后任何拿到链接的人都能查看）`;
         super(source === 'gateway'
             ? '该账号不存在'
-            : `查询不到该账号。请先到 ${ACCOUNT_BIND_URL} 添加并验证游戏账号，再把个人主页设为「公开」（公开后任何拿到链接的人都能查看）`);
+            : unavailableSources.length
+                ? `查询不到该账号：${unavailableSources.join(' / ')} 暂时不可用，本次只查到了兜底数据源，「查不到」不一定代表账号不存在，稍后重试看看。若还没绑定，${bind}`
+                : `查询不到该账号。${bind}；若已绑定并公开仍查不到，说明各数据源都还没有该账号的档案`);
         this.name = 'PlayerNotFoundError';
     }
 }

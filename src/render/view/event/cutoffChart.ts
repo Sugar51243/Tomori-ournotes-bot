@@ -12,6 +12,8 @@ import { drawBackground } from '../../component/background';
 import { drawServerIcon } from '../../component/serverIcon';
 import { fillTextCentered, formatAgo, formatDateTime, cleanText, roundedRectPath } from '../../component/draw';
 import { cjkFontFamily } from '../../component/fonts';
+import { isEventNotRunning } from '../../../features/types/EventPhase';
+import { endedPhaseNote, phaseTitleSuffix } from './phaseNote';
 
 /**
  * 活动榜线 · 折线图(**一张图: 每曲一格 + 三曲同图**)。
@@ -25,7 +27,7 @@ import { cjkFontFamily } from '../../component/fonts';
  * **贴顶用 ▲ 标出、不渲染超出表格的部分**(`outlierFence` + `placePoints`)。
  *
  * 数据是本地按小时采样的历史(上游没有历史接口): 没启用数据库时只在内存里, 重启会遗忘, 页脚会标注。
- * 页脚另有「上游数据更新 / Tomori 记录」一行, 说明这批数据有多新(见 freshnessLine)。
+ * 页脚另有「上游数据更新 / Tomori 记录 / 数据来源」一行, 说明这批数据多新、由链上哪个源供数(见 freshnessLine)。
  */
 
 const WIDTH = 980;
@@ -323,8 +325,10 @@ function drawPanel(
 }
 
 /**
- * 页脚的数据新鲜度行: 上游数据什么时候抓的(解自 ETag) + Tomori 什么时候记的。
+ * 页脚的数据新鲜度行: 上游数据什么时候抓的(数据源钩子或 ETag) + Tomori 什么时候记的 + 数据来源。
  * 时间按**区域时区**显示(与公告图一致); 老文档缺字段时降级为"未知", 一个采样点都没有时不画这行。
+ * 「数据来源」取所画各采样点的 origin 去重 —— 回退链中途换源时会把两家都列出;
+ * 本字段上线前的老数据没有记录, 显示为「未记录（历史数据）」。
  */
 function freshnessLine(server: Server, series: CutoffSeries[], meta: CutoffMeta): string | undefined {
     if (!series.length) return undefined;
@@ -337,7 +341,9 @@ function freshnessLine(server: Server, series: CutoffSeries[], meta: CutoffMeta)
     const recorded = meta.lastRecordedAt
         ? `Tomori 记录 ${stamp(meta.lastRecordedAt)}`
         : 'Tomori 记录时间未知（历史数据）';
-    return `${upstream} · ${recorded}`;
+    const origins = [...new Set(series.flatMap(s => s.points.map(p => p.origin)).filter((o): o is string => !!o))];
+    const origin = origins.length ? `数据来源 ${origins.join(' / ')}` : '数据来源未记录（历史数据）';
+    return `${upstream} · ${recorded} · ${origin}`;
 }
 
 export async function drawCutoffChart(
@@ -426,6 +432,10 @@ export async function drawCutoffChart(
     );
     // 页脚先成行再定画布高度: 行数决定高度, 免得新加一行被画到画布外
     const footerLines: string[] = [];
+    const phase = event.phase();
+    if (isEventNotRunning(phase) && series.length) {
+        footerLines.push(endedPhaseNote(phase, '榜线为活动期内采集的历史数据，不再更新'));
+    }
     const freshness = freshnessLine(server, series, meta);
     if (freshness) footerLines.push(freshness);
     footerLines.push(`分数 = 该档(第 N 名)在当时的出分，本地按小时采样；纵轴以 0 为基准、刻度间隔按数据自适应；数据${cutoffPersistent() ? '存于数据库' : '仅存进程内存（本地数据库不可用，重启会遗忘）'}`);
@@ -439,7 +449,7 @@ export async function drawCutoffChart(
     const ctx = canvas.getContext('2d');
 
     await drawBackground(ctx, WIDTH, height, { server, bandId: event.backgroundBandId() });
-    drawTitle(ctx, WIDTH, '活动榜线 · 分数记录');
+    drawTitle(ctx, WIDTH, `活动榜线 · 分数记录${phaseTitleSuffix(phase)}`);
 
     // 副信息带: 国旗 + 服名 + 活动 + 时长
     const metaMidY = drawMetaBand(ctx, WIDTH);
@@ -469,7 +479,11 @@ export async function drawCutoffChart(
         ctx.fillStyle = '#8a93a0';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText('还没有采样记录（服务启动后会按小时采集，也可用本接口触发一次采样）', MARGIN, HEADER_H + MARGIN + 20);
+        // 已结束的活动不会再采样, 别说「服务启动后会按小时采集」
+        const emptyText = isEventNotRunning(phase)
+            ? '本地没有该活动的榜线记录（采样只在进行中的活动上进行）'
+            : '还没有采样记录（服务启动后会按小时采集，也可用本接口触发一次采样）';
+        ctx.fillText(emptyText, MARGIN, HEADER_H + MARGIN + 20);
     }
     for (const box of boxes) {
         drawPanel(ctx, box, startMs, span);

@@ -21,6 +21,13 @@ export interface FetchedBuffer {
     /** 'hit' | 'revalidated' | 'network' | 'stale' */
     source: 'hit' | 'revalidated' | 'network' | 'stale';
     etag?: string;
+    /**
+     * 实际供数的数据源档案名(如 'bdon.moe' / 'haneoka.org') —— **只由回退链写入**
+     * (见 sources/chain.ts), 出图据此标注「数据来源」; 不经链的直连取数没有这个字段。
+     */
+    origin?: string;
+    /** 上游数据更新时间(ms): 链从 ETag 或数据源自己的钩子解出(见 sources/plan.ts) */
+    upstreamAt?: number;
 }
 
 /**

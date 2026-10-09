@@ -8,10 +8,11 @@
  */
 import { config } from '../config';
 import { diskCache } from './cache';
-import { dbConfigured, friendsCollection, stationsCollection } from './mongo';
+import { bindingsCollection, dbConfigured, friendsCollection, stationsCollection } from './mongo';
 import type { FriendDoc } from '../features/types/Friend';
 import type { StationDoc } from '../features/types/Station';
 import type { FriendServer } from '../features/types/Server';
+import type { BindingDoc } from '../features/types/Binding';
 
 // ---- 磁盘原语 ----
 
@@ -145,4 +146,92 @@ export async function listFriendDocs(): Promise<FriendDoc[] | undefined> {
     const collection = await friendsCollection().catch(() => undefined);
     if (!collection) return undefined;
     return (await collection.find({}).sort({ updatedAt: -1 }).toArray()) as FriendDoc[];
+}
+
+// ---- 玩家绑定(Mongo; 一个 QQ 可绑多个账号) ----
+
+export interface BindingFields {
+    userId: string;
+    /** 网页账号包 id */
+    accountId: number;
+    playerId: string;
+    server: string;
+    /** 网页上给这条账号包的备注名 */
+    label?: string;
+}
+
+/** 查询绑定的结果: 与「数据库不可用」区分开, 命令才能给对不同文案 */
+export type BindingLookup =
+    | { status: 'ok'; doc: BindingDoc | null }
+    | { status: 'db_disabled' };
+
+/**
+ * 新增/更新一条绑定(按 userId+accountId upsert)。
+ * 该用户的**第一个**绑定自动设为默认; 已存在但没有默认的(老数据/异常)也顺手补一个。
+ */
+export async function addBinding(fields: BindingFields): Promise<'ok' | 'db_disabled'> {
+    const collection = await bindingsCollection().catch(() => undefined);
+    if (!collection) return 'db_disabled';
+    const now = new Date();
+    const existing = await collection.countDocuments({ userId: fields.userId });
+    const hasDefault = await collection.countDocuments({ userId: fields.userId, isDefault: true });
+    await collection.updateOne(
+        { userId: fields.userId, accountId: fields.accountId },
+        {
+            $set: {
+                playerId: fields.playerId,
+                server: fields.server,
+                label: fields.label || undefined,
+                updatedAt: now
+            },
+            $setOnInsert: {
+                userId: fields.userId,
+                accountId: fields.accountId,
+                isDefault: existing === 0 || hasDefault === 0,
+                createdAt: now
+            }
+        },
+        { upsert: true }
+    );
+    return 'ok';
+}
+
+/** 某用户的全部绑定: 默认在前, 其余按创建时间 */
+export async function listBindings(userId: string): Promise<BindingDoc[] | undefined> {
+    const collection = await bindingsCollection().catch(() => undefined);
+    if (!collection) return undefined;
+    return (await collection.find({ userId }).sort({ isDefault: -1, createdAt: 1 }).toArray()) as BindingDoc[];
+}
+
+/** 默认绑定(没有默认标记时取最近更新的一条); db_disabled 与"没有绑定"分开表达 */
+export async function getDefaultBinding(userId: string): Promise<BindingLookup> {
+    const collection = await bindingsCollection().catch(() => undefined);
+    if (!collection) return { status: 'db_disabled' };
+    const doc = await collection.findOne({ userId, isDefault: true })
+        ?? await collection.findOne({ userId }, { sort: { updatedAt: -1 } });
+    return { status: 'ok', doc: (doc as BindingDoc | null) ?? null };
+}
+
+/** 解绑指定账号; 若删掉的正是默认账号, 把最早的一条提升为默认 */
+export async function removeBinding(userId: string, accountId: number): Promise<'ok' | 'not_found' | 'db_disabled'> {
+    const collection = await bindingsCollection().catch(() => undefined);
+    if (!collection) return 'db_disabled';
+    const doc = await collection.findOneAndDelete({ userId, accountId });
+    if (!doc) return 'not_found';
+    if (doc.isDefault) {
+        const next = await collection.findOne({ userId }, { sort: { createdAt: 1 } });
+        if (next) await collection.updateOne({ _id: next._id }, { $set: { isDefault: true, updatedAt: new Date() } });
+    }
+    return 'ok';
+}
+
+/** 切换默认账号 */
+export async function setDefaultBinding(userId: string, accountId: number): Promise<'ok' | 'not_found' | 'db_disabled'> {
+    const collection = await bindingsCollection().catch(() => undefined);
+    if (!collection) return 'db_disabled';
+    const target = await collection.findOne({ userId, accountId });
+    if (!target) return 'not_found';
+    await collection.updateMany({ userId, isDefault: true }, { $set: { isDefault: false, updatedAt: new Date() } });
+    await collection.updateOne({ userId, accountId }, { $set: { isDefault: true, updatedAt: new Date() } });
+    return 'ok';
 }

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { config } from '../../config';
 import { ttl } from '../../config/ttl';
-import { cachedFetch } from '../cachedFetch';
+import { chainFetchBuffer } from '../sources/chain';
 import { Server } from '../../features/types/Server';
 import { MusicRanking, RankingEntry } from '../../features/types/Ranking';
 import { ChallengeRanking } from '../../features/types/EventRanking';
@@ -9,6 +9,9 @@ import { ChallengeRanking } from '../../features/types/EventRanking';
 /**
  * 歌曲排行客户端(rankd 公开接口)。
  * 单首歌的响应约 140KB, 必须走磁盘缓存 —— 否则反复查询会把上游和出图都拖死。
+ *
+ * 取数经**数据源回退链**(角色 gameApi): 主源失败时由备用源顶替; 结果带 origin(实际供数源,
+ * 出图标注「数据来源」用)与 upstreamAt(上游数据时间, 链从 ETag 或数据源钩子解出)。
  */
 
 interface RawPlayer {
@@ -42,7 +45,7 @@ function toEntries(players: RawPlayer[]): RankingEntry[] {
 /** 取某服某首歌的前十名; 上游无数据时返回空列表 */
 export async function getMusicRanking(server: Server, musicId: number, limit = 10): Promise<MusicRanking> {
     const empty: MusicRanking = { server, musicId, entries: [] };
-    const res = await cachedFetch(`${config.gameApiBase}/api/v1/${server}/music/${musicId}/ranking`, {
+    const res = await chainFetchBuffer(`${config.gameApiBase}/api/v1/${server}/music/${musicId}/ranking`, {
         key: `ranking/${server}/music_${musicId}.json`,
         ttlS: ttl.rankingTtlS,
         allowStale: true,
@@ -51,10 +54,10 @@ export async function getMusicRanking(server: Server, musicId: number, limit = 1
     if (!res) return empty;
     try {
         const body = JSON.parse(res.data.toString('utf8')) as { players?: RawPlayer[] };
-        if (!Array.isArray(body.players)) return empty;
-        return { server, musicId, entries: toEntries(body.players.slice(0, Math.max(1, limit))) };
+        if (!Array.isArray(body.players)) return { ...empty, origin: res.origin };
+        return { server, musicId, entries: toEntries(body.players.slice(0, Math.max(1, limit))), origin: res.origin };
     } catch {
-        return empty;
+        return { ...empty, origin: res.origin };
     }
 }
 
@@ -71,25 +74,28 @@ export async function getChallengeRanking(server: Server, eventId: number, chall
     const url = `${config.gameApiBase}/api/v1/${server}/events/${eventId}/challenges/${challengeMusicId}/ranking`;
     let data: Buffer | undefined;
     let fetchedAt: number | undefined;
+    let origin: string | undefined;
     try {
-        const res = await cachedFetch(url, {
+        const res = await chainFetchBuffer(url, {
             key: `ranking/${server}/event_${eventId}_challenge_${challengeMusicId}.json`,
             ttlS: ttl.rankingTtlS,
             allowStale: true,
             revalidate: true
         });
         data = res?.data;
-        fetchedAt = fetchedAtFromEtag(res?.etag);
+        origin = res?.origin;
+        // 上游时间: 数据源自己给的优先(haneoka 的 fetchedAtMs), 否则从 ETag 解(bdon rankd)
+        fetchedAt = res?.upstreamAt ?? fetchedAtFromEtag(res?.etag);
     } catch (e) {
         return { entries: [], errorKind: errorKindOf(e) };
     }
     if (!data) return { entries: [], errorKind: 'upstream' };
     try {
         const body = JSON.parse(data.toString('utf8')) as { players?: RawPlayer[] };
-        if (!Array.isArray(body.players)) return { entries: [], fetchedAt };
-        return { entries: toEntries(body.players.slice(0, Math.max(1, limit))), fetchedAt };
+        if (!Array.isArray(body.players)) return { entries: [], fetchedAt, origin };
+        return { entries: toEntries(body.players.slice(0, Math.max(1, limit))), fetchedAt, origin };
     } catch {
-        return { entries: [], fetchedAt };
+        return { entries: [], fetchedAt, origin };
     }
 }
 
