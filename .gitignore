@@ -1,11 +1,3 @@
-node_modules/
-dist/
-cache/
-/data/
-.env
-*.log
-test_result/
-scripts/
-output/
-AI_USE.md
-web/
+# 容器级忽略 —— 各项目自己的规则在 bot/.gitignore 与 database/.gitignore
+# web 项目为私有部署，不随本仓库发布
+/web/

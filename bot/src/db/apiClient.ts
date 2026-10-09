@@ -2,7 +2,7 @@ import { config } from '../config';
 
 /**
  * 数据库 API 客户端。全部 MySQL/MongoDB 行为都在「数据库 API」那个独立进程里,
- * 本进程只发 POST /v1/<module>/<op> 的语义化请求(见 database api/README.md)。
+ * 本进程只发 POST /v1/<module>/<op> 的语义化请求(见 database/README.md)。
  *
  * 约定:
  * - 不自动重试。写操作重试会把「已成功但响应丢了」变成重复提交; 读的失败恢复
@@ -17,7 +17,7 @@ export function dbApiConfigured(): boolean {
 }
 
 export class DbApiError extends Error {
-    /** 对端业务错误码(见 database api 的 ErrorCode); 连接层失败为 undefined */
+    /** 对端业务错误码(见 database/ 项目的 ErrorCode); 连接层失败为 undefined */
     readonly code?: string;
 
     constructor(message: string, code?: string) {

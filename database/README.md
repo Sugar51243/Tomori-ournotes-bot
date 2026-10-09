@@ -25,7 +25,7 @@ node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 ```
 
 令牌要填三处：本服务 `.env` 的 `DB_API_TOKENS="bot=<令牌1>,web=<令牌2>"`、
-bot 的 `.env`（`DB_API_TOKEN=<令牌1>`）、web/server 的 `.env`（`WEB_DB_API_TOKEN=<令牌2>`）。
+bot 的 `.env`（`DB_API_TOKEN=<令牌1>`）、网页平台的 `.env`（`WEB_DB_API_TOKEN=<令牌2>`）。
 
 自检：
 

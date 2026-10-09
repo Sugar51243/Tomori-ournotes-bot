@@ -28,7 +28,7 @@ setup-gateway.bat status     :: 探测 /healthz 与 /v1/status
 ## 手动部署（不用速搭脚本）
 
 1. **拉镜像**：`ghcr.io/starmoe-org/moenotes-api`（无 `latest` 标签，用具体版本或 GitHub Release 里的 digest）。镜像自带启动监听 `0.0.0.0:8080`，进程以 UID/GID **65532** 运行。
-2. **起容器**：挂三份目录 —— 配置（`/etc/moenotes`，只读）、账号（`/accounts`，只读）、状态（`/var/lib/moenotes`，**可写**，首次启动会在这里生成 `config.toml` 模板）；或直接用仓库自带的 `compose.yaml`，配置落在宿主机 `./data/config.toml`，改完重启即可。宿主侧按 0700 建目录、65532 属主，配置文件 0600。
+2. **起容器**：挂三份目录 —— 配置（`/etc/moenotes`，只读）、账号（`/accounts`，只读）、状态（`/var/lib/moenotes`，**可写**，首次启动会在这里生成 `config.toml` 模板）；或自备一份 `compose.yaml` 挂同样的三份目录（社区里有常用模板），配置落在宿主机 `./data/config.toml`，改完重启即可。宿主侧按 0700 建目录、65532 属主，配置文件 0600。
 3. **填配置** `config.toml`：`listen`（容器内必须 `0.0.0.0:8080`）、`api_key`（**32–4096 位随机 ASCII**）、`[session]`（区域、被许可的游戏 origin、平台与客户端/数据版本）。多区域各加一段 `[regions.en]` / `[regions.kr]` …（区域凭据不继承，要各自配）；JP 走单独凭据导入（见其 `docs/jp-accounts.md`）。改完先 `moenotes-server check-config <config>` 校验，再 `serve <config>`。
 4. **放账号**：`/accounts` 下放 `{"user":"EMAIL","password":"PASSWORD"}` 的 JSON（国际服；JP 放 `accounts/jp/`），权限 0600；可选 `strategy = "round_robin"` 在多个账号间轮询。
 5. **验证**：`/healthz` 只看进程存活；带 `Authorization: Bearer <api_key>` 打 `/readyz` 与 `/v1/status` 看会话状态；再试一条真实查询：
@@ -48,7 +48,7 @@ setup-gateway.bat status     :: 探测 /healthz 与 /v1/status
    {"user":"你的账号","password":"你的密码"}
    ```
    日服放 `accounts/jp/`；文件权限设成仅本人可读。
-3. **接上机器人**（项目根目录 `.env`）：
+3. **接上机器人**（`bot/.env`）：
    ```
    MOENOTES_API_BASE=http://127.0.0.1:8080
    MOENOTES_API_KEY=<data/config.toml 里的 api_key>

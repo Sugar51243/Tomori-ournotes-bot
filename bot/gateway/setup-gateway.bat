@@ -101,7 +101,7 @@ echo.
 echo  3) 启动:  setup-gateway.bat run
 echo     自检:  setup-gateway.bat status
 echo.
-echo  4) 把网关接上机器人(项目根目录 .env):
+echo  4) 把网关接上机器人(bot/.env):
 echo         MOENOTES_API_BASE=%BASE_URL%
 echo         MOENOTES_API_KEY=^<上面写入 config.toml 的 api_key^>
 echo     重启机器人后 /health 的 playerGateway 会变成 true。

@@ -11,9 +11,7 @@
     "dev": "tsx watch src/app.ts",
     "build": "tsc",
     "start": "node dist/app.js",
-    "typecheck": "tsc --noEmit",
-    "selftest": "node scripts/selftest.mjs",
-    "export": "node scripts/export.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.9",

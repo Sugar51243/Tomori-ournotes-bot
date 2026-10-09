@@ -3,8 +3,8 @@ import { logger } from '../../logger';
 import { CutoffBackend, CutoffRow, UpsertMode } from './backend';
 
 /**
- * 榜线的「数据库 API」后端(首选存储)。SQL/建表/连接凭据全在 database api
- * 那个独立进程里, 这里只发语义化请求(见 database api/README.md)。
+ * 榜线的「数据库 API」后端(首选存储)。SQL/建表/连接凭据全在 database/
+ * 项目那个独立进程里, 这里只发语义化请求(见 database/README.md)。
  *
  * 与旧的 MySQL 后端职责完全对齐:
  * - 打开时 ping 一次, 连不上返回 undefined(由 CutoffRuntime 回退 SQLite);
