@@ -2,6 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+title Tomori Gateway Setup
 
 rem ============================================================
 rem  moenotes-api 自建网关 · 速搭脚本

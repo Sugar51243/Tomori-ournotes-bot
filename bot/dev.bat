@@ -2,6 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+title Tomori Bot
 
 echo ==========================================
 echo   Tomori - 开发模式 (tsx watch)
@@ -40,6 +41,12 @@ if not exist .env (
 echo.
 echo 开发服务启动中, 按 Ctrl+C 停止。
 echo.
+REM 窗口标题带端口(读 .env), 便于按标题精确结束进程 —— 见根 README「进程管理与防误杀」
+set "PORTVAL="
+for /f "usebackq tokens=1,* delims==" %%a in (".env") do if /i "%%a"=="PORT" set "PORTVAL=%%b"
+set "PORTVAL=%PORTVAL: =%"
+if defined PORTVAL (title Tomori Bot [%PORTVAL%]) else (title Tomori Bot)
+
 call npm run dev
 echo.
 echo 服务已停止。

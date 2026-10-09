@@ -2,6 +2,7 @@
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
+title Tomori Bot
 
 echo ==========================================
 echo   Tomori - BanG Dream! Our Notes 后端 API
@@ -49,6 +50,12 @@ if errorlevel 1 (
 echo.
 echo 服务已启动, 按 Ctrl+C 停止。接口地址见下方日志。
 echo.
+REM 窗口标题带端口(读 .env), 便于按标题精确结束进程 —— 见根 README「进程管理与防误杀」
+set "PORTVAL="
+for /f "usebackq tokens=1,* delims==" %%a in (".env") do if /i "%%a"=="PORT" set "PORTVAL=%%b"
+set "PORTVAL=%PORTVAL: =%"
+if defined PORTVAL (title Tomori Bot [%PORTVAL%]) else (title Tomori Bot)
+
 call npm start
 echo.
 echo 服务已停止。

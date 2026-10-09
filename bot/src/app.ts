@@ -133,6 +133,12 @@ app.use((err: Error, _req: express.Request, res: express.Response, next: express
 registerFonts();
 
 
+// 控制台窗口标题(Windows 上 process.title 即设置控制台标题): 便于按标题精确定位/结束进程,
+// 避免 taskkill /IM node.exe 误杀所有 Node 实例 —— 见根 README「进程管理与防误杀」。
+try {
+    process.title = `Tomori Bot [${config.port}]`;
+} catch { /* 个别平台不支持则忽略 */ }
+
 app.listen(config.port, config.location, () => {
     logger('expressMainThread', `listening on ${config.location}:${config.port} (defaultServer=${config.defaultServer}, servers=${SERVER_LIST.join('/')})`);
     // 榜线历史存储初始化(MySQL → SQLite → 内存)与 Mongo 旧数据迁移, 后台进行不阻塞

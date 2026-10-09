@@ -35,6 +35,28 @@ npm run dev               # 默认 127.0.0.1:3004；Windows 可双击 start.bat 
 
 细节见各项目自己的 README：bot 的部署、端点、数据来源与配置；database 的协议、鉴权、模块表与公网部署要求。
 
+## 进程管理与防误杀
+
+三个项目的服务运行时会**给自己的控制台窗口命名**（程序自身设置，经 `.bat` 启动时同样生效），
+标题里带实际端口 —— 多开时一眼能分清，也能按标题精确结束，不必 `taskkill /IM node.exe` 一把梭：
+
+| 项目 | 窗口标题 |
+| --- | --- |
+| bot | `Tomori Bot [3002]` |
+| database | `Tomori Database API [3004]` |
+| 网页平台（私有） | `Tomori Web [80]`；其 `dev.bat` 另开两个子窗口 `Tomori Web API` / `Tomori Web Client` |
+
+```bat
+:: 只结束某一个项目（/T 连同其子进程）
+taskkill /FI "WINDOWTITLE eq Tomori Bot*" /T /F
+taskkill /FI "WINDOWTITLE eq Tomori Database API*" /T /F
+
+:: 辨认：tasklist /V 的「窗口标题」列 / 任务管理器里对应窗口
+```
+
+> 不经过控制台的后台/服务化启动没有窗口标题，此时按端口定位：
+> `netstat -ano | findstr :3002` 找到 PID 再 `taskkill /PID <pid> /T /F`。
+
 ## 许可证
 
 MIT License，Copyright (c) 2026 Sugar51243（完整文本见 [bot/README.md](bot/README.md) 末尾）。

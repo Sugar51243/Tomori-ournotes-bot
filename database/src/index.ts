@@ -20,7 +20,13 @@ async function main(): Promise<void> {
     const app = createApp();
     // 主端口绑不上(被占/无权限)时不能靠 uncaughtException 兜底假装活着 ——
     // 那样进程不退但一个请求都不收, 对消费方是不可诊断的假死。直接退出让守护进程重启。
-    const server = app.listen(config.port, config.location);
+    // 控制台窗口标题(Windows 上 process.title 即设置控制台标题): 便于按标题精确定位/结束进程,
+// 避免 taskkill /IM node.exe 误杀所有 Node 实例 —— 见根 README「进程管理与防误杀」。
+try {
+    process.title = `Tomori Database API [${config.port}]`;
+} catch { /* 个别平台不支持则忽略 */ }
+
+const server = app.listen(config.port, config.location);
     server.on('error', e => {
         logger('app', `监听 ${config.location}:${config.port} 失败: ${describeError(e)}`, 'error');
         process.exit(1);
