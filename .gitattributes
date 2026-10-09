@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Windows 批处理必须 CRLF; cmd 解析 LF+多字节内容会碎行执行
+*.bat text eol=crlf
