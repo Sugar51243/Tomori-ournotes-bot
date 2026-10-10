@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-tomori-ournotes",
   "description": "BanG Dream! Our Notes 查询插件，对接 Tomori 后端（tsugu 兼容协议）",
-  "version": "1.3.0",
+  "version": "1.2.0",
   "main": "lib/index.js",
   "typings": "lib/index.d.ts",
   "files": [

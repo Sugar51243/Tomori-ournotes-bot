@@ -34,8 +34,7 @@ Koishi 里加载 `koishi-plugin-tomori-ournotes`（npm 上同名，<https://www.
 
 | 插件版本 | 对应 Tomori 后端 | 请求体契约 |
 | --- | --- | --- |
-| **1.3.x**（本版） | **≥ 1.2.0** | 查询输入统一为 `id`，服务器统一为 `displayedServerList` |
-| 1.2.x | ≥ 1.1.0，且含账号包端点（`/playerCard`、`/b25`、`/deckBuilder`、`/playerBind/*`） | 同上 |
+| **1.2.x**（本版） | **≥ 1.2.0**，且含账号包端点（`/playerCard`、`/b25`、`/deckBuilder`、`/playerBind/*`） | 查询输入统一为 `id`，服务器统一为 `displayedServerList` |
 | 1.1.x | ≥ 1.1.0 | 同上（还没有绑定 / 发名片 / b25 / 组卡） |
 | 1.0.0（npm 上的旧版） | 1.0.x 及以前 | 查询输入用 `text`/`songId`/…，服务器用 `server`/`mainServer` |
 
