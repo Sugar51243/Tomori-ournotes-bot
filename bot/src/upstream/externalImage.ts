@@ -5,7 +5,7 @@ import { config } from '../config';
  *
  * 公告横幅来自游戏自己的 CDN, 国旗来自 bdon.moe 站点 —— 都是客户端可控之外的第三方地址。
  * 逐条拉取前必须校验, 否则构造出的任意 URL(name/asset 之类来自上游 JSON)会变成 SSRF 探针。
- * 与 components/avatar.ts 里 isAllowedQqAvatar 的思路一致: 只放行 https + 明确的域后缀。
+ * 与 render/component/avatar.ts 里 resolveAvatarUrl 的思路一致: 只放行明确的来源。
  */
 
 const ALLOWED_HOST_SUFFIXES = [

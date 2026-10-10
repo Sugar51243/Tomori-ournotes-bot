@@ -19,6 +19,23 @@ function envBool(name: string, fallback: boolean): boolean {
     return v.trim().toLowerCase() === 'true';
 }
 
+/**
+ * 本包版本号，从 package.json 现读。
+ *
+ * **不要在源码里写字面量**：原先 User-Agent 里写死的是 `tomori/0.1`，一路到 1.1.0 都没人想起来改
+ * —— 版本号出现在两个地方就一定会漂移。读 package.json 就只有一个真相来源。
+ *
+ * 用 require 而非 import：package.json 在 `rootDir`(src) 之外，
+ * 走 import 会被 TS 拉进编译图、把 outDir 的目录结构搅乱。
+ */
+function packageVersion(): string {
+    try {
+        return (require('../../package.json') as { version?: string }).version ?? '0';
+    } catch {
+        return '0';
+    }
+}
+
 function envJson<T>(name: string, fallback: T): T {
     try {
         return JSON.parse(process.env[name] || '') as T;
@@ -176,7 +193,7 @@ export const config = {
     maxKeywordsPerEntity: envInt('MAX_KEYWORDS_PER_ENTITY', 20),
     gachaDefaultRates: envJson<Record<string, number>>('GACHA_DEFAULT_RATES', { '2': 88.5, '3': 8.5, '4': 3.0 }),
     /** 上游请求的 User-Agent; 留空则用内置默认(带运行时 Node 版本) */
-    userAgent: envStr('USER_AGENT', `tomori/0.1 (Node ${process.version})`)
+    userAgent: envStr('USER_AGENT', `tomori/${packageVersion()} (Node ${process.version})`)
 };
 
 export { ttl } from './ttl';

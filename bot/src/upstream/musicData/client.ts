@@ -72,6 +72,8 @@ interface RawMusicData {
 }
 
 let cached: MusicData | undefined;
+/** 上面这份是什么时候装进来的 —— 它**也要按 TTL 过期**，见 getMusicData */
+let cachedAt = 0;
 let inflight: Promise<MusicData | undefined> | undefined;
 
 function num(v: unknown): number | undefined {
@@ -157,9 +159,15 @@ function compact(raw: RawMusicData, kindId: number): MusicDataChartStat[] {
 /**
  * 取谱面效率数据(懒加载 + 模块级缓存; 磁盘缓存按 MUSIC_DATA_TTL_S 重验证)。
  * 上游不可用且无陈旧副本时返回 undefined, 由调用方按领域错误处理。
+ *
+ * ⚠ 模块级这份**也必须按 TTL 过期**。原先写的是 `if (cached) return cached` ——
+ * 一旦装进来就再也不会去问更新, 把下面磁盘缓存的 TTL 整个架空了:
+ * 游戏版本更新(新曲、技能权重变了)之后, bot 会一直按旧表算到**进程重启**为止,
+ * 而且看不出任何异样。现在过期后重走一遍取数: 版本没变就是一次 304 空响应,
+ * 只有真的变了才会重新下载与解析(13MB 那份解析才是大头, 不受影响)。
  */
 export async function getMusicData(): Promise<MusicData | undefined> {
-    if (cached) return cached;
+    if (cached && Date.now() - cachedAt < ttl.musicDataTtlS * 1000) return cached;
     if (!inflight) {
         inflight = (async () => {
             const res = await chainFetchBuffer(config.musicDataUrl, {
@@ -168,10 +176,12 @@ export async function getMusicData(): Promise<MusicData | undefined> {
                 allowStale: true,
                 revalidate: true
             }).catch(() => undefined);
-            if (!res) return undefined;
+            // 取不到就把手上这份旧的继续用着（不更新时间戳，下次调用再试）——
+            // 过期不等于必须立刻丢掉，总比让组卡直接不可用强
+            if (!res) return cached;
             try {
                 const raw = JSON.parse(res.data.toString('utf8')) as RawMusicData;
-                if (!Array.isArray(raw.songs)) return undefined;
+                if (!Array.isArray(raw.songs)) return cached;
                 const charts = compact(raw, plainKindId(raw));
                 // 降级判定(来源无关): 有谱面却没有任何技能权重 ⟹ 种子模型缺席, 是替代源的降级数据
                 const degraded = charts.length > 0
@@ -184,10 +194,11 @@ export async function getMusicData(): Promise<MusicData | undefined> {
                     degraded
                 };
                 logger('musicData', `parsed ${charts.length} chart stats (${(res.data.length / 1024 / 1024).toFixed(1)}MB raw) from ${res.origin ?? 'direct'}${degraded ? ' [degraded: no skill weights]' : ''}`);
+                cachedAt = Date.now();
                 return cached;
             } catch (e) {
                 logger('musicData', `parse failed: ${e instanceof Error ? e.message : e}`);
-                return undefined;
+                return cached;
             }
         })().finally(() => { inflight = undefined; });
     }

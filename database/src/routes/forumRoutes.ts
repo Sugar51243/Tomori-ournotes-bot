@@ -67,6 +67,11 @@ export const forumOps: OpTable = {
         viewerId: optInt(p, 'viewerId', { min: 1 }),
     }),
 
+    /** 正文里是否还有某个片段(上传媒体的清理判定; 片段是文件名, 上限按文件名给足) */
+    contentContains: async p => ({
+        referenced: await repo.contentContainsFragment(rawStr(p, 'fragment', { max: 128 })),
+    }),
+
     listPostsByAuthor: async p => repo.listPostsByAuthor({
         authorId: reqInt(p, 'authorId', { min: 1 }),
         offset: optInt(p, 'offset', { min: 0, def: 0 }) ?? 0,

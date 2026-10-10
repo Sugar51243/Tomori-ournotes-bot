@@ -96,6 +96,11 @@ export interface OwnedMember {
     training: number;
     /** 觉醒次数 0..4 */
     awakening: number;
+    /**
+     * live 技能等级 1..5（账号包成员卡的第 5 项）。全量档的技能基准按「该卡 live 技能在
+     * 该等级的**无条件**得分比率」取值；缺省（旧数据/夹具）按 1 级算。
+     */
+    liveSkillLevel?: number;
 }
 
 export interface OwnedSupport {
@@ -627,6 +632,132 @@ export const OVERHEAD_MS = 30000;
  * 但绝对分数会与实际有偏差。界面上要如实标注这一点。
  */
 export const ASSUMED_SKILL_MULTIPLIER = 1;
+
+/**
+ * 技能基准（组卡搜索用）。
+ *
+ * 期望得分 = 综合力 × (base + 各槽基准的**均值** × ΣW) —— 技能槽的发动顺序未知，
+ * 取均值即全排列的期望（与站点「所需综合力（期望）」同口径）。
+ *
+ * - 数字：所有技能槽统一按该倍率（倍率不是百分比，1 = +100%）；
+ * - `'live'`：逐槽取**该槽成员卡的 live 技能**在**该卡技能等级**下的「无条件得分比率」
+ *   （4★ L5 +130% 记 1.3；查 bundle.liveSkillRatios，缺数据回退 1.0）。
+ *
+ * 各方案的取值见 `baselineForScheme`（optimize.ts）：方案3（可自定义）默认统一 60%；方案0~2、4
+ * 全量档 = 'live'、非全量档 = 50%。
+ */
+export type SkillBaseline = number | number[] | 'live';
+
+/** 方案0 的统一技能基准：每槽 +60% */
+export const SKILL_BASELINE_FLAT = 0.6;
+/** 非全量档的技能基准：每槽 +50% */
+export const SKILL_BASELINE_PRECISE = 0.5;
+
+/** 该卡 live 技能的无条件得分比率（倍率；卡/技能/等级缺数据时回退 1.0 = +100%） */
+export function liveSkillBaseline(bundle: MasterBundle, member: OwnedMember): number {
+    const card = mcardById(bundle, member.cardId);
+    const skillId = card ? Number(card[15] ?? 0) : 0;
+    if (!skillId) return 1;
+    const ratios = bundle.liveSkillRatios?.[String(skillId)];
+    if (!ratios || !ratios.length) return 1;
+    const level = Math.min(ratios.length, Math.max(1, Math.round(member.liveSkillLevel ?? 1)));
+    const value = Number(ratios[level - 1]);
+    return Number.isFinite(value) && value > 0 ? value / 10000 : 1;
+}
+
+/** 旧版 bundle（v3，无 live 技能数据）时 'live' 基准的说明（界面/notes 用） */
+export const LIVE_DEGRADED_NOTE =
+    '主数据是**旧版**（v3，无 live 技能数据）：全量档技能基准回退为各槽统一 +60%；网页平台更新后自动恢复。';
+
+/** bundle 里有没有 live 技能数据（v4 起才有；v3 旧版没有 ⇒ 'live' 基准要回退） */
+export function liveSkillsAvailable(bundle: MasterBundle): boolean {
+    return !!bundle.liveSkillRatios && Object.keys(bundle.liveSkillRatios).length > 0;
+}
+
+/** 成员卡的持有角色 id（认不出卡时用 -cardId 兜底，避免把未知卡误判成同角色） */
+export function memberCharacterId(bundle: MasterBundle, member: OwnedMember): number {
+    const card = mcardById(bundle, member.cardId);
+    return card ? card[4] : -member.cardId;
+}
+
+/**
+ * 同一角色只能上一张角色卡（参考站组卡器的合法性检查 "duplicate-character: 此角色已在第 n 槽"）。
+ * 组合枚举要过滤掉重复角色的队伍; 逐档替换（方案3）也要用它做合法性校验。
+ */
+export function hasDuplicateCharacter(bundle: MasterBundle, members: OwnedMember[]): boolean {
+    const seen = new Set<number>();
+    for (const member of members) {
+        const id = memberCharacterId(bundle, member);
+        if (seen.has(id)) return true;
+        seen.add(id);
+    }
+    return false;
+}
+
+/** 一支队伍各技能槽的基准值（倍率数组，槽序与 members 一致） */
+export function deckSkillBaseline(bundle: MasterBundle, members: OwnedMember[], baseline: SkillBaseline): number[] {
+    if (typeof baseline === 'number') return members.map(() => baseline);
+    if (Array.isArray(baseline)) {
+        // 手填的逐槽值（方案0 的五项输入）；短的向后取最后一项/默认值
+        const fallback = baseline[baseline.length - 1] ?? SKILL_BASELINE_FLAT;
+        return members.map((_, i) => baseline[i] ?? fallback);
+    }
+    // 旧版 bundle（v3，无 live 技能数据）：回退统一 +60% 的保守基准，出说明见 skillBaselineNote
+    if (!liveSkillsAvailable(bundle)) return members.map(() => SKILL_BASELINE_FLAT);
+    return members.map(m => liveSkillBaseline(bundle, m));
+}
+
+/** 技能基准的均值（前 slots 个槽；发动顺序未知 → 期望口径 = 均值 × ΣW） */
+export function skillMean(skills: number[], slots: number): number {
+    const n = Math.min(slots, skills.length);
+    if (n <= 0) return 0;
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += skills[i] ?? 0;
+    return sum / n;
+}
+
+/** 分/综合力（技能基准口径）：base + 基准均值 × ΣW */
+export function baselineRate(chart: ChartEfficiency, skills: number[]): number {
+    return chart.baseFree + skillMean(skills, chart.weightsFree.length) * chart.weightsFree.reduce((a, b) => a + b, 0);
+}
+
+/** 期望得分（技能基准口径，取整与 expectedScore 一致） */
+export function expectedScoreBaseline(power: number, chart: ChartEfficiency, skills: number[]): number {
+    return Math.floor(power * baselineRate(chart, skills));
+}
+
+/** 组卡搜索方案（网页组卡器可选；bot 固定方案0） */
+export type DeckScheme = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * 方案 → 技能基准：
+ * - 方案0（现有算法）：各槽统一 +60%（不区分精度）；
+ * - 方案1~4：全量档 = 各卡 live 技能（该卡技能等级的无条件得分比率）、非全量档 = 每槽 +50%。
+ */
+export function baselineForScheme(scheme: DeckScheme, precision: DeckPrecision, skillPercent?: number[]): SkillBaseline {
+    if (scheme === 3) {
+        // 方案3（基准取序·可自定义）的技能基准允许手填（参考站同款「五项手填值」）：默认五槽全 +60%
+        if (skillPercent && skillPercent.length) {
+            return skillPercent.map(v => (Number.isFinite(v) ? Math.min(1000, Math.max(0, v)) / 100 : SKILL_BASELINE_FLAT));
+        }
+        return SKILL_BASELINE_FLAT;
+    }
+    return precision === 'full' ? 'live' : SKILL_BASELINE_PRECISE;
+}
+
+/** 技能基准的说明文案（notes / 出图用） */
+export function skillBaselineNote(scheme: DeckScheme, precision: DeckPrecision, skillPercent?: number[]): string {
+    if (scheme === 3) {
+        const values = skillPercent?.length ? skillPercent.map(v => Math.round(v)) : [60, 60, 60, 60, 60];
+        return values.every(v => v === values[0])
+            ? `技能基准：各槽统一 +${values[0]}%（手填值，未使用各卡实际技能）。`
+            : `技能基准：各槽手填 ${values.join('/')}%（未使用各卡实际技能）。`;
+    }
+    return precision === 'full'
+        ? '技能基准：各槽按该卡 live 技能在该卡技能等级下的无条件得分比率（全量档口径）。'
+        : '技能基准：各槽统一 +50%（非全量档口径）。';
+}
+
 
 /** 期望得分 = 综合力 × (base + Σ 技能倍率 × 权重) */
 export function expectedScore(power: number, chart: ChartEfficiency, skills: number[] = []): number {

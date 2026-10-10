@@ -43,7 +43,7 @@ export class PackageError extends Error {
  * 旧客户端拿到读不懂的数据, 在换算里静默算出些看似正常、其实错位的结果。
  * 顺带它还充当缓存键的一部分: 以后再加版本, 浏览器里那些旧副本自然就用不上了。
  */
-export const BUNDLE_FORMAT = 3;
+export const BUNDLE_FORMAT = 4;
 
 /** 三维参数 rate [performance, technic, visual]，单位 10000 = 100% */
 export type RateTriple = [number, number, number];
@@ -53,10 +53,10 @@ export type LeaderSkillEffectRow = number[];
 
 /**
  * 成员卡：[id, assetID, 名idx, 副标题idx, characterId, rarity, cardType,
- *         等级组, 特训组, 觉醒组, pMax, tMax, vMax, 标签[], leaderSkillID]
+ *         等级组, 特训组, 觉醒组, pMax, tMax, vMax, 标签[], leaderSkillID, liveSkillID]
  */
 export type MemberCardTuple = [
-    number, number, number, number, number, number, number, number, number, number, number, number, number, number[], number,
+    number, number, number, number, number, number, number, number, number, number, number, number, number, number[], number, number,
 ];
 /** 留影卡：[id, assetID, 名idx, rarity, cardType, 等级组, 突破组, pMax, tMax, vMax, 角色id[]] */
 export type SupportCardTuple = [number, number, number, number, number, number, number, number, number, number, number[]];
@@ -113,6 +113,14 @@ export interface MasterBundle {
     tgwRates: Array<[number, number]>;
     /** 类型链接 / 类型加成 / 偏好曲的基础加成率 */
     rateBases: { typeBase: number; tagBase: number; linkBase: number };
+    /**
+     * live 技能的无条件得分比率：liveSkillID → [等级 1..maxLevel 的值, …]，单位 10000 = 100%。
+     * 全量档的技能基准 = 成员卡 liveSkillID 对应数组、下标 = 该卡技能等级 - 1（方案1~4 用）。
+     *
+     * **v3 旧版 bundle 没有这个字段**（v3→v4 是尾部追加的可读兼容改动）——消费方按缺省处理：
+     * liveSkillID 读到 0、liveSkillRatios 为空 ⇒ 技能基准回退统一 +60%（见 deckSkillBaseline）。
+     */
+    liveSkillRatios?: Record<string, number[]>;
     /** 活动加成条件行，见服务端的字段说明 */
     eventEffects: number[][];
 }

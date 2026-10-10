@@ -9,8 +9,8 @@ import { FONT_STACK } from '../../component/fonts';
 import { serverDisplayName } from '../../../features/types/Server';
 
 /**
- * 交友列表图: 一行一人 —— 头像 + QQ 名 + QQ 号 + 游戏 ID + 服务器。
- * 头像走 qlogo.cn 白名单 + 磁盘缓存, 拉不到则画占位块(首字符 + 确定性颜色)。
+ * 交友列表图: 一行一人 —— 头像 + 昵称 + 身份(QQ 号/网页用户) + 游戏 ID + 服务器。
+ * 头像白名单见 render/component/avatar.ts(qlogo.cn 或网页平台账号头像), 拉不到则画占位块。
  */
 const WIDTH = 900;
 const MARGIN = 16;
@@ -55,7 +55,9 @@ export async function drawFriendList(friends: FriendDoc[], compress: boolean): P
             ctx.fillText(cleanText(friend.userName), tx, y + 12, WIDTH - tx - MARGIN - 10);
             ctx.fillStyle = '#BBB';
             ctx.font = `13px ${FONT_STACK}`;
-            ctx.fillText(`QQ ${friend.userId} · 服务器 ${serverDisplayName(friend.server)}`, tx, y + 38, WIDTH - tx - MARGIN - 10);
+            // 网页用户(web:<账号ID>)在 QQ 群里没有 QQ 号可看, 标出来源即可
+            const identity = friend.userId.startsWith('web:') ? '网页用户' : `QQ ${friend.userId}`;
+            ctx.fillText(`${identity} · 服务器 ${serverDisplayName(friend.server)}`, tx, y + 38, WIDTH - tx - MARGIN - 10);
             ctx.fillText(`游戏ID ${friend.playerId}`, tx, y + 56, WIDTH - tx - MARGIN - 10);
         }
         buffers.push(await outputFinalBuffer(canvas, compress));

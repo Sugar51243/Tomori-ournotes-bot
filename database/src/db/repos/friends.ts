@@ -5,7 +5,7 @@ import { collection } from '../mongo';
  * userId 唯一索引由 db/mongo.ts 启动时建好; 网页用户在 bot 侧的身份是 `web:<id>` 前缀。
  *
  * 写入复刻两边的既有契约: userName/playerId/server/updatedAt 必写, avatarUrl 缺省即 $unset
- * (网页侧先例; bot 的读取侧对 null/缺省一视同仁)。
+ * (网页侧写的是账号头像; bot 的读取侧对 null/缺省一视同仁)。
  */
 
 /** 搜索词进正则前的转义(两边调用方原来各自转, 现在服务端统一做) */
@@ -47,6 +47,16 @@ export async function upsert(fields: {
     if (!fields.avatarUrl) update.$unset = { avatarUrl: '' };
 
     await col.updateOne({ userId: fields.userId }, update, { upsert: true });
+}
+
+/**
+ * 只改头像(网页用户换账号头像后, 名片跟着刷新)。文档不存在就什么都不做。
+ * 刻意不动 updatedAt —— 换头像不该让名片在列表里跳到最前面。
+ */
+export async function setAvatar(userId: string, avatarUrl: string | undefined): Promise<void> {
+    const col = await collection('friends');
+    const update = avatarUrl ? { $set: { avatarUrl } } : { $unset: { avatarUrl: '' } };
+    await col.updateOne({ userId }, update);
 }
 
 export async function search(pattern: string, limit: number): Promise<Array<Record<string, unknown>>> {

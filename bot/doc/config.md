@@ -131,7 +131,7 @@ bot 与**私有部署的网页平台**以 HTTP API 交接，bot 不直连网页�
 | `HTTP_RETRIES` | int | `3` | 网络错误/5xx 的重试次数（4xx 不重试） |
 | `HTTP_RETRY_BASE_MS` | int（毫秒） | `1000` | 重试退避基数：第 n 次重试等待 基数×3^(n-1) |
 | `HTTP_TIMEOUT_MS` | int（毫秒） | `20000` | 单次上游请求超时 |
-| `USER_AGENT` | string | `tomori/0.1 (Node <运行时版本>)` | 上游请求的 User-Agent，留空使用内置默认 |
+| `USER_AGENT` | string | `tomori/<本包版本> (Node <运行时版本>)` | 上游请求的 User-Agent；**留空即用内置默认**（版本号从 package.json 现读，不会随发版漂移） |
 
 ## 数据库与社区
 

@@ -9,7 +9,7 @@ export interface FriendDoc {
     userId: string;
     /** QQ 名字 */
     userName: string;
-    /** QQ 头像网址(仅接受 qlogo.cn 域, 出图时校验) */
+    /** 头像地址: QQ 头像(qlogo.cn) 或网页账号头像(/api/avatars/<内容哈希>, 相对网页平台拼绝对); 出图时校验 */
     avatarUrl?: string;
     /** 游戏 ID */
     playerId: string;

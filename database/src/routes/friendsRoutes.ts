@@ -19,6 +19,12 @@ export const friendsOps: OpTable = {
         return { ok: true };
     },
 
+    /** 账号换头像时只动 avatarUrl(其余字段与 updatedAt 都不碰); 不带 avatarUrl = 清除 */
+    setAvatar: async p => {
+        await repo.setAvatar(reqStr(p, 'userId', { max: 32 }), optStr(p, 'avatarUrl', { max: 512 }));
+        return { ok: true };
+    },
+
     search: async p => repo.search(
         rawStr(p, 'pattern', { max: 64 }),
         reqInt(p, 'limit', { min: 1, max: 100 })

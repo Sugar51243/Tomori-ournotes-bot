@@ -22,12 +22,14 @@ export const ttl = {
     musicDataTtlS: 86400,
     /** 玩家档案缓存(仅进程内, 不落盘) */
     playerTtlS: 300,
+    // 这里原本还有个 webAccountTtlS(网页账号包摘要 60s)。已经删掉:
+    // 那份摘要里带着公开开关/数据更新时间/主数据版本, 它本身就是"网页改了什么"的信号,
+    // 按时间复用等于让改动迟到(网页上开了道具公开, bot 组卡还回「没有公开道具数据」)。
+    // 现在只合并同时在飞的请求, 跨命令一律重新读 —— 见 src/webPlatform/client.ts。
     /**
-     * 网页平台的账号包查询(仅进程内; 见 src/webPlatform/client.ts)。
-     * 压到 60s: 账号包是快照、本身不重要, 但**公开开关的变更要尽快见效**(隐藏后别再多显示 5 分钟)。
+     * 网页平台的 master bundle(组卡查表用; 按主数据版本变, 一天一问足够)。
+     * 取值只是"多久算新鲜"，实际每次都会带 ETag 回源校核(forceRefresh)，版本变了立刻跟上。
      */
-    webAccountTtlS: 60,
-    /** 网页平台的 master bundle(组卡查表用; 按主数据版本变, 一天一问足够) */
     masterBundleTtlS: 86400,
     /** 关键词内存快照的兜底 TTL(上传/删除会主动强刷, 这里只兜底多进程/多实例场景) */
     keywordCacheTtlS: 60

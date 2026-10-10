@@ -1,4 +1,4 @@
-import { deckPower, memberPower, supportRates } from './deck';
+import { deckPower, hasDuplicateCharacter, memberPower, supportRates } from './deck';
 import type { DeckPower, OwnedMember, OwnedSupport } from './deck';
 import type { GameAccountCardsData, GameAccountItemsData, MasterBundle } from './types';
 
@@ -128,6 +128,8 @@ export function bestDecksPerBand(
         const defaultSupports = sCombos[0];
         for (const pick of combos(candidates.length, 5)) {
             const picked = pick.map(i => candidates[i]);
+            // 同一角色只能上一张角色卡（参考站组卡器的 legality）
+            if (hasDuplicateCharacter(bundle, picked)) continue;
             const power = deckPower(bundle, { ...base, members: picked, supports: defaultSupports });
             scored.push({ members: picked, supports: defaultSupports, power });
         }

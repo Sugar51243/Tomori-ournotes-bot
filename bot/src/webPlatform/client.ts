@@ -121,30 +121,34 @@ async function callWeb<T>(path: string, init: { method?: 'GET' | 'POST'; body?: 
     }
 }
 
-// ---- 账号查询（带进程内短缓存 + 单飞合并：一图多段数据别重复问） ----
+// ---- 账号查询 ----
 
 interface LookupValue { account: WebAccountSummary; songStatus?: SongStatusSummary }
-const lookupCache = new Map<string, { at: number; value: LookupValue }>();
+/**
+ * **只合并"同时在飞"的请求，不做跨命令的时间缓存**。
+ *
+ * 这里曾经按 60s 复用旧结果，理由是"账号包是快照、别重复问"。但这份摘要里带着
+ * `visible`（公开开关）、`updatedAt`（数据更新）与 `masterVersion`（版本变动）——
+ * 也就是说**它恰恰是"网页那边改了什么"的信号**，缓存它等于让改动迟到。
+ * 实测踩到的样子：网页上把道具设为公开，bot 组卡照样回「该账号没有公开道具数据」。
+ *
+ * 所以：一次命令里问几次都走同一个 promise（下面这层单飞），跨命令一律重新读。
+ * 这个接口只回摘要，很轻，多问一次的代价远小于拿旧开关做判断。
+ */
 const lookupInflight = new Map<string, Promise<LookupValue>>();
 
 /** 按玩家公开 ID + 服 找账号包（bot 的查玩家/b25/组卡入口） */
 export async function lookupAccount(playerId: string, server: Server): Promise<LookupValue> {
     ensureConfigured();
     const key = `${server}/${playerId}`;
-    const hit = lookupCache.get(key);
-    if (hit && Date.now() - hit.at < ttl.webAccountTtlS * 1000) return hit.value;
-
     const pending = lookupInflight.get(key);
     if (pending) return pending;
 
-    const task = callWeb<LookupValue>(`/api/bot/accounts/lookup?playerId=${encodeURIComponent(playerId)}&server=${server}`)
-        .then(value => {
-            lookupCache.set(key, { at: Date.now(), value });
-            // 简单上限: 单进程不会同时热很多玩家
-            if (lookupCache.size > 200) lookupCache.delete(lookupCache.keys().next().value as string);
-            return value;
-        })
-        .finally(() => { lookupInflight.delete(key); });
+    const task = callWeb<LookupValue>(`/api/bot/accounts/lookup?playerId=${encodeURIComponent(playerId)}&server=${server}`).finally(
+        () => {
+            lookupInflight.delete(key);
+        }
+    );
 
     lookupInflight.set(key, task);
     return task;

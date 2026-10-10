@@ -4,15 +4,20 @@ import { isServerInput, pickServers, withServer } from '../../features/types/Ser
 import { middleware } from '../middleware';
 import { Event } from '../../features/types/Event';
 import { resolveCurrentEvent } from '../../upstream/adapter';
+import { challengeSongIds } from '../../features/event/challengeSongs';
 
 /**
  * 组卡器的「活动模式」上下文（给网页端，不是给聊天机器人用的）。
  *
  * 给的是当前进行中的活动 + 该活动的演出报酬表：**各得分评级能拿多少活动点数、
- * 掉哪些交换所道具**。网页端拿它乘以每小时局数，就得到「收益/小时」。
+ * 掉哪些交换所道具**。网页端拿它乘以每小时局数、再乘活动加成，就得到「收益/小时」。
  *
  * 点数与掉落都来自主数据（MasterLiveEventPoint / MasterLiveEventReward），
  * 所以是真实数值，不是估算。活动结束后上游仍会挂着旧活动，这里按「只取进行中」处理。
+ *
+ * 另附两样组卡器要用的东西：
+ * - `bonusBandIds`：本次活动加成涉及的乐队（自由live「活动乐队曲目」那组榜用它筛曲）；
+ * - `challengeMusicIds`：活动挑战曲池（挑战live 只能用这几首；与 /eventRecommend 同口径）。
  */
 const router = express.Router();
 
@@ -49,6 +54,9 @@ router.post(
                         liveRewards: toRows(event.liveRewards),
                         // 挑战演出报酬单列（挑战曲的收益与普通演出不是同一套表）
                         challengeRewards: toRows(event.challengeRewards),
+                        // 活动加成涉及的乐队 / 活动挑战曲池（组卡器的自由·活动乐队榜与挑战live 模式要用）
+                        bonusBandIds: event.bonusBandIds,
+                        challengeMusicIds: await challengeSongIds(server, event.eventId).catch(() => []),
                     },
                 });
                 return;

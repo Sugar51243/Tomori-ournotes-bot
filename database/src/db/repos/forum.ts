@@ -171,6 +171,21 @@ export async function searchPosts(opts: {
     );
 }
 
+/**
+ * 未删除的帖子/评论正文里是否出现过某个片段(论坛上传媒体的"还有没有人引用"判定用)。
+ * 片段来自磁盘文件名(我们自己生成的内容哈希), 但 LIKE 通配符仍然转义 —— 这一层该做的事。
+ */
+export async function contentContainsFragment(fragment: string): Promise<boolean> {
+    const like = `%${fragment.replace(/[\\%_]/g, c => `\\${c}`)}%`;
+    const row = await queryOne<{ n: number }>(
+        `SELECT
+            (SELECT COUNT(*) FROM web_forum_posts WHERE status = 1 AND content LIKE ?) +
+            (SELECT COUNT(*) FROM web_forum_comments WHERE status = 1 AND content LIKE ?) AS n`,
+        [like, like]
+    );
+    return Number(row?.n ?? 0) > 0;
+}
+
 /** 某个作者的帖子(个人主页用) */
 export async function listPostsByAuthor(opts: {
     authorId: number;

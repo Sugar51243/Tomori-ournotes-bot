@@ -95,6 +95,25 @@ const DDL: string[] = [
         KEY idx_target (target_type, target_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+    // ---- 用户通知（被艾特 / 被回复）----
+    // 注意别和下面的 web_notices（管理员发的站内公告）看混：一个是发给个人的提醒，
+    // 一个是全站公告，命名刻意分成 notification / notice 两套。
+    `CREATE TABLE IF NOT EXISTS web_notifications (
+        id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        user_id    BIGINT UNSIGNED NOT NULL,
+        actor_id   BIGINT UNSIGNED NOT NULL,
+        kind       ENUM('mention','reply') NOT NULL,
+        post_id    BIGINT UNSIGNED NOT NULL,
+        -- 0 表示「这条通知对应的是帖子本身」。**故意不用 NULL**：
+        -- 唯一索引里 NULL 互不相等，用 NULL 会让帖子级的通知完全不去重。
+        comment_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+        is_read    TINYINT(1)      NOT NULL DEFAULT 0,
+        created_at DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        PRIMARY KEY (id),
+        UNIQUE KEY uniq_source (user_id, post_id, comment_id),
+        KEY idx_user_unread (user_id, is_read, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
     // ---- 网页公告 ----
     `CREATE TABLE IF NOT EXISTS web_notices (
         id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

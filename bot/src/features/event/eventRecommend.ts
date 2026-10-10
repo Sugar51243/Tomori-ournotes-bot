@@ -4,7 +4,8 @@ import { Event } from '../types/Event';
 import { EventPhase } from '../types/EventPhase';
 import { Song } from '../types/Song';
 import { storeFor } from '../../db/adapter';
-import { getEventTracking, resolveCurrentEvent } from '../../upstream/adapter';
+import { resolveCurrentEvent } from '../../upstream/adapter';
+import { challengeSongIds } from './challengeSongs';
 import { searchEvents, textToFuzzyResult } from '../../search/search';
 import { noCurrentEventText } from './currentEvent';
 import { drawEventList } from '../../render/view/event/eventList';
@@ -175,19 +176,6 @@ async function borrowedChallengeRows(server: Server, musicIds: number[], targetR
         if (!added) missing.push(musicId);
     }
     return { rows, missing };
-}
-
-/**
- * 该活动的挑战曲(挑战live 只能选这些): 先问上游追踪, 取不到再退 masterdata 的 MasterChallengeMusic
- * (其主键 id 是挑战曲 id, liveMusicId 才是曲目 id) —— 与 /eventRanking 同一套兜底。
- */
-async function challengeSongIds(server: Server, eventId: number): Promise<number[]> {
-    const tracking = await getEventTracking(server, eventId).catch(() => undefined);
-    if (tracking?.status === 'ok' && tracking.track.songs.length) {
-        return [...new Set(tracking.track.songs.map(s => s.musicId))];
-    }
-    const rows = await storeFor(server).challengeMusicByEvent(eventId).catch(() => []);
-    return [...new Set(rows.map(r => Number(r.liveMusicId)).filter(Number.isFinite))];
 }
 
 /** 该曲本体取哪个服的数据: 所选服优先, 没有就借港澳台 -> 日服 -> 其余 */

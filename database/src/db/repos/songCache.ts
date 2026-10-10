@@ -21,8 +21,9 @@ export async function putCachedTitles(server: Server, entries: Array<{ songId: n
     const placeholders = entries.map(() => '(?, ?, ?)').join(', ');
     const args: unknown[] = [];
     for (const e of entries) args.push(e.songId, server, e.title);
+    // fetched_at 不进列清单: 新行走列默认值 CURRENT_TIMESTAMP(3), 冲突行在 UPDATE 里刷新
     await execute(
-        `INSERT INTO web_song_cache (song_id, server, title, fetched_at)
+        `INSERT INTO web_song_cache (song_id, server, title)
          VALUES ${placeholders}
          ON DUPLICATE KEY UPDATE title = VALUES(title), fetched_at = CURRENT_TIMESTAMP(3)`,
         args
