@@ -1,0 +1,11 @@
+{
+  // Koishi 实例（yukamo 等模板）的 tsconfig 常常没开 strict —— 那种配置下
+  // **真值收窄**（`if (!x.ok)`）对可辨识联合不生效，只有等值收窄（`=== false` / `== false`）生效。
+  // 这份配置用非 strict 再检查一遍源码，避免「本仓库能过、装进实例就报 TS2339」。
+  // 用法：npm run typecheck:loose
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": false,
+    "noEmit": true
+  }
+}
