@@ -99,7 +99,7 @@ async function renderRecommend(server: Server, event: Event, eventId: number, co
 
     // 挑战live 是**单独模式**: 只能用当前活动的挑战曲, 所以单开一表放在最下方,
     // 池子 = 活动曲的 HD/EX 谱面, 按目标评级 SS 的所需综合力升序**全列**(池子小, 不截前 N),
-    // 报酬只算挑战演出报酬。分数模型与自由live 同口径(激走关、单人门槛)。
+    // 报酬只算挑战演出报酬。分数模型与自由live 同口径(激奏关、单人门槛)。
     const challengeIds = await challengeSongIds(server, eventId);
     const notes: string[] = [];
     if (challengeIds.length) {

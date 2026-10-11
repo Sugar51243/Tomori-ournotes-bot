@@ -49,15 +49,27 @@ interface RawScoreRank {
     battleRequiredScore?: number;
 }
 
+/**
+ * 一条模型条目。**格式 2(nnnotes.music-data/2)起数值包成了 [中心, 半宽] 区间对**
+ * (score 与逐槽权重都是), 格式 1 是裸数字 —— 两种都吃, 见 centerOf。
+ */
 interface RawSeed {
-    score?: number;
-    weights?: Array<Array<number | null> | undefined>;
+    score?: number | number[];
+    weights?: Array<Array<number | number[] | null> | undefined>;
 }
 
 interface RawDeck {
     unplayable?: boolean;
     positions?: number;
+    /** 格式 1 的**击奏开**模型(激奏开、全区间 1 名): 一条或多条种子, 逐条平均 */
     seeds?: RawSeed[];
+    /**
+     * 格式 2 起取代 `seeds` 的**击奏开**模型: 同一个模型的标称期望(中心 ± 半宽)。
+     * 半宽是抽样区间(实测 ≤ 0.8 分、权重 ≤ 5e-6), 取中心即原种子的取值 —— 只改字段名/报法, 没换口径。
+     */
+    expectation?: RawSeed;
+    /** 格式 2 起: 该谱面回放用的种子**编号**(只有编号, 不含分数) */
+    replaySeeds?: number[];
     offSeeds?: RawSeed[];
 }
 
@@ -81,6 +93,15 @@ function num(v: unknown): number | undefined {
     return Number.isFinite(n) ? n : undefined;
 }
 
+/**
+ * 取模型里的一个数值。格式 2 起是 [中心, 半宽] 区间对(取中心), 格式 1 是裸数字。
+ * null 一律当缺失(注意 Number(null) 是 0, 不能让「条件读激奏状态的档」的 null 权重混成 0 以外的数)。
+ */
+function centerOf(v: unknown): number | undefined {
+    if (v === null || v === undefined) return undefined;
+    return num(Array.isArray(v) ? v[0] : v);
+}
+
 /** 普通加分技能(效果 2000)的种类 id —— 效率公式的 W 用它那套权重 */
 function plainKindId(raw: RawMusicData): number {
     const kinds = raw.deck?.kinds ?? [];
@@ -94,20 +115,20 @@ function plainKindId(raw: RawMusicData): number {
     return plain?.id ?? 0;
 }
 
-/** 一组种子的 base 与权重均值(种子缺失/字段缺失一律容错跳过) */
-function statsOf(seeds: RawSeed[] | undefined, power: number, kindId: number): { base: number; weights: number[] } | undefined {
-    if (!seeds?.length || !power) return undefined;
+/** 一组模型条目的 base 与权重均值(条目缺失/字段缺失一律容错跳过) */
+function statsOf(models: RawSeed[] | undefined, power: number, kindId: number): { base: number; weights: number[] } | undefined {
+    if (!models?.length || !power) return undefined;
     let base = 0;
     const slotSums: number[] = [];
     let counted = 0;
-    for (const seed of seeds) {
-        const score = num(seed.score);
+    for (const model of models) {
+        const score = centerOf(model.score);
         if (score === undefined) continue;
         counted++;
         base += score / power;
-        const w = seed.weights?.[kindId] ?? [];
+        const w = model.weights?.[kindId] ?? [];
         for (let i = 0; i < w.length; i++) {
-            slotSums[i] = (slotSums[i] ?? 0) + (num(w[i]) ?? 0);
+            slotSums[i] = (slotSums[i] ?? 0) + (centerOf(w[i]) ?? 0);
         }
     }
     if (!counted) return undefined;
@@ -115,6 +136,16 @@ function statsOf(seeds: RawSeed[] | undefined, power: number, kindId: number): {
         base: base / counted,
         weights: slotSums.map(s => s / counted)
     };
+}
+
+/**
+ * 原始 JSON → 裁剪后的谱面表(**不经过网络**)。
+ * 上游改一次字段名就会把某个场景的模型整段抽空, 所以离线自检
+ * (`scripts/_verify-music-data-formats.ts`)直接拿它逐格式比对, 而不是只靠出图目检。
+ */
+export function parseMusicData(raw: unknown): MusicDataChartStat[] {
+    const typed = raw as RawMusicData;
+    return compact(typed, plainKindId(typed));
 }
 
 /** 解析并裁剪: 只留榜单需要的字段 */
@@ -131,7 +162,10 @@ function compact(raw: RawMusicData, kindId: number): MusicDataChartStat[] {
             const scoreId = num(c.scoreId);
             const level = num(c.displayLevel) ?? num(c.level);
             if (scoreId === undefined || level === undefined || bgmMs === undefined || !c.deck) continue;
-            const battle = statsOf(c.deck.seeds, power, kindId);
+            // 击奏开的模型: 格式 2 起是 expectation(标称期望), 格式 1 是 seeds(逐条种子)。
+            // **别再只认 seeds** —— 只认它会静默丢掉击奏模型, 击奏榜/推荐曲的击奏段整段变空。
+            const battleSeeds = c.deck.expectation ? [c.deck.expectation] : c.deck.seeds;
+            const battle = statsOf(battleSeeds, power, kindId);
             const free = statsOf(c.deck.offSeeds, power, kindId);
             if (!battle && !free) continue;
             const scoreRanks = (song.scoreRanks ?? [])
@@ -182,7 +216,7 @@ export async function getMusicData(): Promise<MusicData | undefined> {
             try {
                 const raw = JSON.parse(res.data.toString('utf8')) as RawMusicData;
                 if (!Array.isArray(raw.songs)) return cached;
-                const charts = compact(raw, plainKindId(raw));
+                const charts = parseMusicData(raw);
                 // 降级判定(来源无关): 有谱面却没有任何技能权重 ⟹ 种子模型缺席, 是替代源的降级数据
                 const degraded = charts.length > 0
                     && !charts.some(c => (c.battle?.weights.length ?? 0) > 0 || (c.free?.weights.length ?? 0) > 0);
@@ -194,6 +228,13 @@ export async function getMusicData(): Promise<MusicData | undefined> {
                     degraded
                 };
                 logger('musicData', `parsed ${charts.length} chart stats (${(res.data.length / 1024 / 1024).toFixed(1)}MB raw) from ${res.origin ?? 'direct'}${degraded ? ' [degraded: no skill weights]' : ''}`);
+                // 上游换个字段名(实测: /1 的 seeds → /2 的 expectation)就会把某个场景的模型整段抽空,
+                // 出图只是「没有满足该评级的谱面」, 看不出是数据问题 —— 所以缺模型必须吭声
+                const noBattle = charts.filter(c => !c.battle).length;
+                const noFree = charts.filter(c => !c.free).length;
+                if (noBattle || noFree) {
+                    logger('musicDataWarn', `上游 ${cached.format} 有谱面缺得分模型: 击奏 ${noBattle}/${charts.length}、自由 ${noFree}/${charts.length} —— 字段可能又改名了(查 compact 的字段映射)`);
+                }
                 cachedAt = Date.now();
                 return cached;
             } catch (e) {

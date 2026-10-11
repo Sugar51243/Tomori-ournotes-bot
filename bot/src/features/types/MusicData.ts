@@ -3,9 +3,10 @@
  *
  * 得分模型(与站点一致, 实测数值对得上):
  *   期望得分 P 点综合力打一首歌 = P × (base + Σ_k 技能槽_k平均加成 × W_k)
- *   - base:  模型综合力(30 万)下、理论最佳游玩的全曲得分 ÷ 模型综合力, 按种子平均
- *   - W_k:   第 k 个技能槽放一个 +100% 普通加分技能时整局多得的分数 ÷ 综合力, 按种子平均
- *   - 击奏live 用 seeds(激走开, 全区间 1 名), 自由live 用 offSeeds(激走关)
+ *   - base:  模型综合力(30 万)下、理论最佳游玩的全曲得分 ÷ 模型综合力, 按条目平均
+ *   - W_k:   第 k 个技能槽放一个 +100% 普通加分技能时整局多得的分数 ÷ 综合力, 按条目平均
+ *   - 击奏live 用**激奏开**的那套模型(格式 1 的 seeds / 格式 2 的 expectation, 全区间 1 名),
+ *     自由live 用 offSeeds(激奏关)
  *   效率(分/综合力/分钟) = 上式 ÷ ((BGM 时长 + 结算耗时) / 60000)
  */
 
@@ -32,9 +33,9 @@ export interface MusicDataChartStat {
     bgmMs: number;
     /** 击奏live 无法游玩(第 4 个 Fever 起游戏会出错) —— 不进击奏榜, 自由榜不受影响 */
     unplayable: boolean;
-    /** 击奏live(激走开)的得分模型 */
+    /** 击奏live(激奏开)的得分模型 */
     battle?: { base: number; weights: number[] };
-    /** 自由live(激走关)的得分模型 */
+    /** 自由live(激奏关)的得分模型 */
     free?: { base: number; weights: number[] };
     /** 各评级门槛(D~SS) */
     scoreRanks: MusicDataScoreRank[];
