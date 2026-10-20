@@ -1,0 +1,10 @@
+node_modules/
+dist/
+cache/
+/data/
+.env
+*.log
+test_result/
+scripts/
+output/
+AI_USE.md

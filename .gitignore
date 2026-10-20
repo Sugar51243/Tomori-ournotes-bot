@@ -1,10 +1,9 @@
-node_modules/
-dist/
-cache/
+# 容器级忽略 —— 各项目自己的规则在 bot/.gitignore 与 database/.gitignore
+# web 项目为私有部署，不随本仓库发布
+/web/
+
+# 测试结果统一放这里供目检, 检完即删(不进发布)
+/测试结果/
+
+# 生成的上游主数据缓存(跑脚本时按相对路径落在这里)；不进仓库
 /data/
-.env
-*.log
-test_result/
-scripts/
-output/
-AI_USE.md
